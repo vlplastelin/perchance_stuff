@@ -66,7 +66,7 @@ async function pollClientOffers() {
     } catch (err) {
       console.warn("pollClientOffers error:", err);
     }
-    await sleep(400);
+    await sleep(1500);
   }
 }
 
@@ -157,7 +157,7 @@ async function startClient(roomId, clientId) {
     } catch (e) {
       console.warn("client poll error:", e);
     }
-  }, 400);
+  }, 1500);
 }
 
 // ===== Кандидаты =====
