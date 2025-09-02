@@ -78,7 +78,6 @@ async function hostAcceptClientOffer(clientId, clientOffer) {
     setupDataChannel(ch, `Client ${clientId}`);
   };
 
-  // Trickle ICE — отправляем кандидатов по мере появления
   pc.onicecandidate = async (e) => {
     if (e.candidate) {
       let room = await getRoom(HOST_ROOM_ID);
@@ -104,7 +103,6 @@ async function hostAcceptClientOffer(clientId, clientOffer) {
   }
   await updateRoom(HOST_ROOM_ID, room);
 
-  // Подгружаем кандидаты клиента
   pollClientCandidates(pc, clientId, "candidates");
 }
 
@@ -185,24 +183,16 @@ async function pollClientCandidates(pc, clientId, field, roomId = HOST_ROOM_ID) 
 }
 
 // ===== DataChannel =====
-// Глобальные колбэки (можно переопределить в коде страницы)
 window.onRTCMessage = (fromId, text) => {
-  console.log(`Сообщение от ${fromId}:`, text);
+  let parsed = text;
+  try { parsed = JSON.parse(text); } catch {}
+  console.log(`Сообщение от ${fromId}:`, parsed);
 };
 
-window.onRTCOpen = (fromId) => {
-  console.log(`Канал открыт с ${fromId}`);
-};
+window.onRTCOpen = (fromId) => console.log(`Канал открыт с ${fromId}`);
+window.onRTCClose = (fromId) => console.log(`Канал закрыт с ${fromId}`);
+window.onRTCError = (fromId, error) => console.warn(`Ошибка канала с ${fromId}:`, error);
 
-window.onRTCClose = (fromId) => {
-  console.log(`Канал закрыт с ${fromId}`);
-};
-
-window.onRTCError = (fromId, error) => {
-  console.warn(`Ошибка канала с ${fromId}:`, error);
-};
-
-// Универсальная настройка канала
 function setupDataChannel(channel, label, id = label) {
   channel.onopen = () => window.onRTCOpen?.(id);
   channel.onmessage = e => window.onRTCMessage?.(id, e.data);
@@ -210,44 +200,44 @@ function setupDataChannel(channel, label, id = label) {
   channel.onerror = e => window.onRTCError?.(id, e);
 }
 
-// ===== UI =====
-window.startHost = startHost;
-window.startClient = startClient;
-window.hostBroadcast = () => {
-  const msg = prompt("Broadcast от Host:");
-  if (msg != null) {
-    for (const { dc } of hostPeers.values()) {
-      if (dc?.readyState === "open") dc.send(msg);
-    }
-  }
-};
-window.clientSend = () => {
-  const msg = prompt("Client → Host:");
-  if (clientDC?.readyState === "open") clientDC.send(msg);
-  else alert("Канал клиента ещё не открыт");
-};
-
 // ===== Определение роли =====
 function getRole() {
   const hasRoomId = !!localStorage.getItem(LS_KEY);
-  const hasHostPeers = hostPeers.size > 0;
   const hasClientPC = typeof clientPC !== "undefined" && clientPC !== null;
-
   if (hasRoomId && !hasClientPC) return "host";
   if (hasClientPC) return "client";
-  return "none"; // ещё не подключены
+  return "none";
+}
+function isHost() { return getRole() === "host"; }
+function isClient() { return getRole() === "client"; }
+
+// ===== Универсальная отправка =====
+function sendMessage(data, toClientId = null) {
+  const payload = (typeof data === "object") ? JSON.stringify(data) : String(data);
+  if (isHost()) {
+    if (toClientId) {
+      const peer = hostPeers.get(toClientId);
+      if (peer?.dc?.readyState === "open") peer.dc.send(payload);
+    } else {
+      for (const { dc } of hostPeers.values()) {
+        if (dc?.readyState === "open") dc.send(payload);
+      }
+    }
+  } else if (isClient()) {
+    if (clientDC?.readyState === "open") clientDC.send(payload);
+  } else {
+    console.warn("Не определена роль — сообщение не отправлено");
+  }
 }
 
-function isHost() {
-  return getRole() === "host";
-}
-
-function isClient() {
-  return getRole() === "client";
-}
-
-// Делаем доступным глобально
-window.getRole = getRole;
-window.isHost = isHost;
-window.isClient = isClient;
-
+// ===== API =====
+window.API = {
+  startHost,
+  startClient,
+  sendMessage,
+  getRole,
+  isHost,
+  isClient,
+  hostBroadcast: (msg) => sendMessage(msg),
+  clientSend: (msg) => sendMessage(msg)
+};
