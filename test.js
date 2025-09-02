@@ -59,6 +59,7 @@ async function pollClientOffers() {
   while (true) {
     let hasNewOffers = false;
     try {
+      // Ждем завершения запроса, не запускаем следующий до окончания этого
       const room = await getRoom(HOST_ROOM_ID);
       const now = Date.now();
       let changed = false;
@@ -177,21 +178,26 @@ async function startClient(roomId, clientId) {
   }
   await updateRoom(roomId, room);
 
+  // Заменяем setInterval на асинхронный цикл с await
   if (clientPollTimer) clearInterval(clientPollTimer);
-  clientPollTimer = setInterval(async () => {
-    try {
-      room = await getRoom(roomId);
-      const me = room.clients.find(c => c.id === clientId);
-      if (me?.answer) {
-        await clientPC.setRemoteDescription(me.answer);
-        clearInterval(clientPollTimer);
-        console.log("Answer получен:", clientId);
-        pollClientCandidates(clientPC, clientId, "hostCandidates", roomId);
+  let answerReceived = false;
+  (async function pollAnswer() {
+    while (!answerReceived) {
+      try {
+        room = await getRoom(roomId);
+        const me = room.clients.find(c => c.id === clientId);
+        if (me?.answer) {
+          await clientPC.setRemoteDescription(me.answer);
+          answerReceived = true;
+          console.log("Answer получен:", clientId);
+          pollClientCandidates(clientPC, clientId, "hostCandidates", roomId);
+        }
+      } catch (e) {
+        console.warn("client poll error:", e);
       }
-    } catch (e) {
-      console.warn("client poll error:", e);
+      if (!answerReceived) await sleep(1500);
     }
-  }, 1500);
+  })();
 }
 
 // ===== Кандидаты =====
