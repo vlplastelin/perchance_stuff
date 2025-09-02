@@ -184,15 +184,40 @@ async function pollClientCandidates(pc, clientId, field, roomId = HOST_ROOM_ID) 
 }
 
 // ===== DataChannel =====
+let rtcMessageHandler = null;
+let rtcOpenHandler = null;
+let rtcCloseHandler = null;
+let rtcErrorHandler = null;
+
 window.onRTCMessage = (fromId, text) => {
   let parsed = text;
   try { parsed = JSON.parse(text); } catch {}
   console.log(`Сообщение от ${fromId}:`, parsed);
+  if (typeof rtcMessageHandler === "function") {
+    rtcMessageHandler(fromId, text);
+  }
 };
 
-window.onRTCOpen = (fromId) => console.log(`Канал открыт с ${fromId}`);
-window.onRTCClose = (fromId) => console.log(`Канал закрыт с ${fromId}`);
-window.onRTCError = (fromId, error) => console.warn(`Ошибка канала с ${fromId}:`, error);
+window.onRTCOpen = (fromId) => {
+  console.log(`Канал открыт с ${fromId}`);
+  if (typeof rtcOpenHandler === "function") {
+    rtcOpenHandler(fromId);
+  }
+};
+
+window.onRTCClose = (fromId) => {
+  console.log(`Канал закрыт с ${fromId}`);
+  if (typeof rtcCloseHandler === "function") {
+    rtcCloseHandler(fromId);
+  }
+};
+
+window.onRTCError = (fromId, error) => {
+  console.warn(`Ошибка канала с ${fromId}:`, error);
+  if (typeof rtcErrorHandler === "function") {
+    rtcErrorHandler(fromId, error);
+  }
+};
 
 function setupDataChannel(channel, label, id = label) {
   channel.onopen = () => window.onRTCOpen?.(id);
@@ -241,8 +266,8 @@ window.API = {
   isClient,
   hostBroadcast: (msg) => sendMessage(msg),
   clientSend: (msg) => sendMessage(msg),
-  onRTCMessage: (fromId, text) => window.onRTCMessage?.(fromId, text),
-  onRTCOpen: (fromId) => window.onRTCOpen?.(fromId),
-  onRTCClose: (fromId) => window.onRTCClose?.(fromId),
-  onRTCError: (fromId, err) => window.onRTCError?.(fromId, err)
+  onRTCMessage: (handler) => { rtcMessageHandler = handler; },
+  onRTCOpen: (handler) => { rtcOpenHandler = handler; },
+  onRTCClose: (handler) => { rtcCloseHandler = handler; },
+  onRTCError: (handler) => { rtcErrorHandler = handler; }
 };
