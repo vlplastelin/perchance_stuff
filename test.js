@@ -245,6 +245,7 @@ let rtcErrorHandler = null;
 
 window.onRTCMessage = (fromId, text) => {
   let parsed = text;
+  console.log(`Сообщение от ${fromId}:`, parsed);
   try { parsed = JSON.parse(text); } catch {}
 parsed
   if (typeof rtcMessageHandler === "function") {
