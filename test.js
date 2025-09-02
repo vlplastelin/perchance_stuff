@@ -297,6 +297,7 @@ function isClient() { return getRole() === "client"; }
 // ===== Универсальная отправка =====
 function sendMessage(data, toClientId = null, exceptClientId = null) {
   const payload = (typeof data === "object") ? JSON.stringify(data) : String(data);
+  console.log("sending message",isHost())
   if (isHost()) {
     if (toClientId) {
       if (toClientId !== exceptClientId) {
