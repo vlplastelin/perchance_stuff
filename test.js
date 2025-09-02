@@ -193,11 +193,7 @@ function setupDataChannel(channel, label) {
 
 // ========== UI helpers ==========
 window.startHost = startHost;
-window.startClient2 = async () => {
-  const roomId = prompt("Room ID:");
-  const clientId = prompt("Client ID (уникальный):");
-  await startClient(roomId, clientId);
-};
+window.startClient = startClient;
 window.hostBroadcast = () => {
   const msg = prompt("Broadcast от Host:");
   if (msg != null) hostBroadcast(msg);
