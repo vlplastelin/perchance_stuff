@@ -71,10 +71,11 @@ async function startHost() {
   // 2) Жёстко обнуляем состояние комнаты (даже если roomId уже был)
   await updateRoom(HOST_ROOM_ID, { clients: [] });
   console.log("Комната очищена:", HOST_ROOM_ID);
-  alert("Room ID для клиентов: " + HOST_ROOM_ID);
+  
 
   // 3) Запускаем опрос клиентов
   pollClientOffers();
+  return HOST_ROOM_ID
 }
 
 async function pollClientOffers() {
