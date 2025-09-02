@@ -1,6 +1,7 @@
 const API_BASE = "https://jsonblob.com/api/jsonBlob";
 const LS_KEY = "webrtc_room_id";
 const ICE_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+window.API = window.API || {};
 
 // ===== JSONBlob API =====
 async function createRoom(data) {
