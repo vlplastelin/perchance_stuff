@@ -240,4 +240,8 @@ window.API = {
   isClient,
   hostBroadcast: (msg) => sendMessage(msg),
   clientSend: (msg) => sendMessage(msg)
+  onRTCMessage: (fromId, text) => window.onRTCMessage?.(fromId, text),
+  onRTCOpen: (fromId) => window.onRTCOpen?.(fromId),
+  onRTCClose: (fromId) => window.onRTCClose?.(fromId),
+  onRTCError: (fromId, err) => window.onRTCError?.(fromId, err)
 };
