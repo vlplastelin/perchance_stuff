@@ -54,11 +54,28 @@ async function startHost() {
 }
 
 async function pollClientOffers() {
+  let pollInterval = 2000;
+  let fastPoll = false;
   while (true) {
+    let hasNewOffers = false;
     try {
       const room = await getRoom(HOST_ROOM_ID);
+      const now = Date.now();
+      let changed = false;
+      // Удаляем клиентов с offer старше 30 сек и без answer
+      room.clients = (room.clients || []).filter(c => {
+        if (c.offer && !c.answer && c.offerTimestamp && now - c.offerTimestamp > 30000) {
+          changed = true;
+          console.log("Удаляем просроченного клиента:", c.id);
+          return false;
+        }
+        return true;
+      });
+      if (changed) await updateRoom(HOST_ROOM_ID, room);
+
       for (const c of room.clients || []) {
         if (c.offer && !c.answer && !hostPeers.has(c.id)) {
+          hasNewOffers = true;
           console.log("Новый клиент:", c.id);
           await hostAcceptClientOffer(c.id, c.offer);
         }
@@ -66,7 +83,16 @@ async function pollClientOffers() {
     } catch (err) {
       console.warn("pollClientOffers error:", err);
     }
-    await sleep(1500);
+    // Если есть новые offers — ускоряемся
+    if (hasNewOffers) {
+      pollInterval = 400;
+      fastPoll = true;
+    } else if (fastPoll) {
+      // Если новых нет, возвращаемся к медленному режиму
+      pollInterval = 2000;
+      fastPoll = false;
+    }
+    await sleep(pollInterval);
   }
 }
 
@@ -134,12 +160,20 @@ async function startClient(roomId, clientId) {
 
   let room = await getRoom(roomId);
   const existing = room.clients.find(c => c.id === clientId);
+  const now = Date.now();
   if (existing) {
     existing.offer = clientPC.localDescription;
     existing.answer = null;
     existing.candidates = [];
+    existing.offerTimestamp = now;
   } else {
-    room.clients.push({ id: clientId, offer: clientPC.localDescription, answer: null, candidates: [] });
+    room.clients.push({
+      id: clientId,
+      offer: clientPC.localDescription,
+      answer: null,
+      candidates: [],
+      offerTimestamp: now
+    });
   }
   await updateRoom(roomId, room);
 
