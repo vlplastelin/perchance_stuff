@@ -280,7 +280,8 @@ function sendMessage(data, toClientId = null, exceptClientId = null) {
         const peer = hostPeers.get(toClientId);
         if (peer?.dc?.readyState === "open") peer.dc.send(payload);
       }
-    } else {
+    } 
+    if(!toClientId && exceptClientId) {
       for (const [clientId, { dc }] of hostPeers.entries()) {
         if (clientId !== exceptClientId && dc?.readyState === "open") dc.send(payload);
       }
