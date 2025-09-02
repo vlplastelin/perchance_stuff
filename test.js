@@ -295,13 +295,14 @@ function isClient() { return getRole() === "client"; }
 function sendMessage(data, toClientId = null, exceptClientId = null) {
   const payload = (typeof data === "object") ? JSON.stringify(data) : String(data);
   if (isHost()) {
+    console.log("Host sending message:", { toClientId, exceptClientId, payload });
     if (toClientId) {
       if (toClientId !== exceptClientId) {
         const peer = hostPeers.get(toClientId);
         if (peer?.dc?.readyState === "open") peer.dc.send(payload);
       }
     } 
-    if(!toClientId && exceptClientId) {
+    if(!toClientId && exceptClientId!=null) {
       for (const [clientId, { dc }] of hostPeers.entries()) {
         console.log(clientId, exceptClientId, dc?.readyState);
         if (clientId !== exceptClientId && dc?.readyState === "open") dc.send(payload);
