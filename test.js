@@ -226,3 +226,28 @@ window.clientSend = () => {
   if (clientDC?.readyState === "open") clientDC.send(msg);
   else alert("Канал клиента ещё не открыт");
 };
+
+// ===== Определение роли =====
+function getRole() {
+  const hasRoomId = !!localStorage.getItem(LS_KEY);
+  const hasHostPeers = hostPeers.size > 0;
+  const hasClientPC = typeof clientPC !== "undefined" && clientPC !== null;
+
+  if (hasRoomId && !hasClientPC) return "host";
+  if (hasClientPC) return "client";
+  return "none"; // ещё не подключены
+}
+
+function isHost() {
+  return getRole() === "host";
+}
+
+function isClient() {
+  return getRole() === "client";
+}
+
+// Делаем доступным глобально
+window.getRole = getRole;
+window.isHost = isHost;
+window.isClient = isClient;
+
