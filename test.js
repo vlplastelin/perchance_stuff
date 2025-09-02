@@ -1,1 +1,3 @@
-alert("here")
+function test(){
+    alert("here")
+}
