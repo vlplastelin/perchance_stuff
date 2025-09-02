@@ -185,11 +185,29 @@ async function pollClientCandidates(pc, clientId, field, roomId = HOST_ROOM_ID) 
 }
 
 // ===== DataChannel =====
-function setupDataChannel(channel, label) {
-  channel.onopen = () => console.log(`DataChannel открыт (${label})`);
-  channel.onmessage = e => console.log(`[${label}]`, e.data);
-  channel.onclose = () => console.log(`DataChannel закрыт (${label})`);
-  channel.onerror = e => console.warn(`DataChannel ошибка (${label})`, e);
+// Глобальные колбэки (можно переопределить в коде страницы)
+window.onRTCMessage = (fromId, text) => {
+  console.log(`Сообщение от ${fromId}:`, text);
+};
+
+window.onRTCOpen = (fromId) => {
+  console.log(`Канал открыт с ${fromId}`);
+};
+
+window.onRTCClose = (fromId) => {
+  console.log(`Канал закрыт с ${fromId}`);
+};
+
+window.onRTCError = (fromId, error) => {
+  console.warn(`Ошибка канала с ${fromId}:`, error);
+};
+
+// Универсальная настройка канала
+function setupDataChannel(channel, label, id = label) {
+  channel.onopen = () => window.onRTCOpen?.(id);
+  channel.onmessage = e => window.onRTCMessage?.(id, e.data);
+  channel.onclose = () => window.onRTCClose?.(id);
+  channel.onerror = e => window.onRTCError?.(id, e);
 }
 
 // ===== UI =====
