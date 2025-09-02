@@ -238,15 +238,17 @@ function isHost() { return getRole() === "host"; }
 function isClient() { return getRole() === "client"; }
 
 // ===== Универсальная отправка =====
-function sendMessage(data, toClientId = null) {
+function sendMessage(data, toClientId = null, exceptClientId = null) {
   const payload = (typeof data === "object") ? JSON.stringify(data) : String(data);
   if (isHost()) {
     if (toClientId) {
-      const peer = hostPeers.get(toClientId);
-      if (peer?.dc?.readyState === "open") peer.dc.send(payload);
+      if (toClientId !== exceptClientId) {
+        const peer = hostPeers.get(toClientId);
+        if (peer?.dc?.readyState === "open") peer.dc.send(payload);
+      }
     } else {
-      for (const { dc } of hostPeers.values()) {
-        if (dc?.readyState === "open") dc.send(payload);
+      for (const [clientId, { dc }] of hostPeers.entries()) {
+        if (clientId !== exceptClientId && dc?.readyState === "open") dc.send(payload);
       }
     }
   } else if (isClient()) {
