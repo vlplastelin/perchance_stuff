@@ -282,11 +282,14 @@ function setupDataChannel(channel, label, id = label) {
 
 // ===== Определение роли =====
 function getRole() {
+  const hasRoomId = !!localStorage.getItem(LS_KEY);
   const hasClientPC = typeof clientPC !== "undefined" && clientPC !== null;
-    if (hasClientPC){
-        return "client";
-    }
-    if (!hasClientPC) return "host";
+  // Если есть clientPC — это клиент
+  if (hasClientPC) return "client";
+  // Если есть roomId и нет clientPC — это хост
+  if (hasRoomId) return "host";
+  // Иначе роль не определена
+  return "none";
 }
 function isHost() { return getRole() === "host"; }
 function isClient() { return getRole() === "client"; }
@@ -294,19 +297,18 @@ function isClient() { return getRole() === "client"; }
 // ===== Универсальная отправка =====
 function sendMessage(data, toClientId = null, exceptClientId = null) {
   const payload = (typeof data === "object") ? JSON.stringify(data) : String(data);
-  console.log(isHost())
   if (isHost()) {
-    console.log("Host sending message:", { toClientId, exceptClientId, payload });
     if (toClientId) {
       if (toClientId !== exceptClientId) {
         const peer = hostPeers.get(toClientId);
         if (peer?.dc?.readyState === "open") peer.dc.send(payload);
       }
-    } 
-    if(!toClientId && exceptClientId!=null) {
+    } else {
+      // Broadcast всем, кроме exceptClientId если он задан
       for (const [clientId, { dc }] of hostPeers.entries()) {
-        console.log(clientId, exceptClientId, dc?.readyState);
-        if (clientId !== exceptClientId && dc?.readyState === "open") dc.send(payload);
+        if (clientId !== exceptClientId && dc?.readyState === "open") {
+          dc.send(payload);
+        }
       }
     }
   } else if (isClient()) {
