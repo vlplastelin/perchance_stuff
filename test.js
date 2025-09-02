@@ -106,14 +106,21 @@ async function hostAcceptClientOffer(clientId, clientOffer) {
     setupDataChannel(ch, `Client ${clientId}`);
   };
 
+  let isUpdatingHostCandidates = false;
   pc.onicecandidate = async (e) => {
     if (e.candidate) {
-      let room = await getRoom(HOST_ROOM_ID);
-      const cli = room.clients.find(c => c.id === clientId);
-      if (cli) {
-        cli.hostCandidates = cli.hostCandidates || [];
-        cli.hostCandidates.push(e.candidate);
-        await updateRoom(HOST_ROOM_ID, room);
+      if (isUpdatingHostCandidates) return;
+      isUpdatingHostCandidates = true;
+      try {
+        let room = await getRoom(HOST_ROOM_ID);
+        const cli = room.clients.find(c => c.id === clientId);
+        if (cli) {
+          cli.hostCandidates = cli.hostCandidates || [];
+          cli.hostCandidates.push(e.candidate);
+          await updateRoom(HOST_ROOM_ID, room);
+        }
+      } finally {
+        isUpdatingHostCandidates = false;
       }
     }
   };
@@ -144,14 +151,21 @@ async function startClient(roomId, clientId) {
   clientDC = clientPC.createDataChannel("chat");
   setupDataChannel(clientDC, "Host");
 
+  let isUpdatingClientCandidates = false;
   clientPC.onicecandidate = async (e) => {
     if (e.candidate) {
-      let room = await getRoom(roomId);
-      const me = room.clients.find(c => c.id === clientId);
-      if (me) {
-        me.candidates = me.candidates || [];
-        me.candidates.push(e.candidate);
-        await updateRoom(roomId, room);
+      if (isUpdatingClientCandidates) return;
+      isUpdatingClientCandidates = true;
+      try {
+        let room = await getRoom(roomId);
+        const me = room.clients.find(c => c.id === clientId);
+        if (me) {
+          me.candidates = me.candidates || [];
+          me.candidates.push(e.candidate);
+          await updateRoom(roomId, room);
+        }
+      } finally {
+        isUpdatingClientCandidates = false;
       }
     }
   };
@@ -268,11 +282,11 @@ function setupDataChannel(channel, label, id = label) {
 
 // ===== Определение роли =====
 function getRole() {
-  const hasRoomId = !!localStorage.getItem(LS_KEY);
   const hasClientPC = typeof clientPC !== "undefined" && clientPC !== null;
-  if (hasRoomId && !hasClientPC) return "host";
-  if (hasClientPC) return "client";
-  return "none";
+    if (hasClientPC){
+        return "client";
+    }
+    if (!hasClientPC) return "host";
 }
 function isHost() { return getRole() === "host"; }
 function isClient() { return getRole() === "client"; }
