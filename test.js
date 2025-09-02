@@ -303,6 +303,7 @@ function sendMessage(data, toClientId = null, exceptClientId = null) {
     } 
     if(!toClientId && exceptClientId) {
       for (const [clientId, { dc }] of hostPeers.entries()) {
+        console.log(clientId, exceptClientId, dc?.readyState);
         if (clientId !== exceptClientId && dc?.readyState === "open") dc.send(payload);
       }
     }
