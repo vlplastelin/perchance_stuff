@@ -190,30 +190,24 @@ let rtcCloseHandler = null;
 let rtcErrorHandler = null;
 
 window.onRTCMessage = (fromId, text) => {
-  let parsed = text;
-  try { parsed = JSON.parse(text); } catch {}
-  console.log(`Сообщение от ${fromId}:`, parsed);
   if (typeof rtcMessageHandler === "function") {
     rtcMessageHandler(fromId, text);
   }
 };
 
 window.onRTCOpen = (fromId) => {
-  console.log(`Канал открыт с ${fromId}`);
   if (typeof rtcOpenHandler === "function") {
     rtcOpenHandler(fromId);
   }
 };
 
 window.onRTCClose = (fromId) => {
-  console.log(`Канал закрыт с ${fromId}`);
   if (typeof rtcCloseHandler === "function") {
     rtcCloseHandler(fromId);
   }
 };
 
 window.onRTCError = (fromId, error) => {
-  console.warn(`Ошибка канала с ${fromId}:`, error);
   if (typeof rtcErrorHandler === "function") {
     rtcErrorHandler(fromId, error);
   }
