@@ -1,336 +1,249 @@
-const API_BASE = "https://jsonblob.com/api/jsonBlob";
-const LS_KEY = "webrtc_room_id";
-const ICE_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-window.API = window.API || {};
-
-// ===== JSONBlob API =====
-async function createRoom(data) {
-  const res = await fetch(API_BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify(data)
-  });
-  if (!res.ok) throw new Error("createRoom failed");
-  return res.headers.get("Location").split("/").pop();
-}
-
-async function getRoom(roomId) {
-  const res = await fetch(`${API_BASE}/${roomId}`);
-  if (!res.ok) throw new Error("getRoom failed");
-  return res.json();
-}
-
-async function updateRoom(roomId, data) {
-  const res = await fetch(`${API_BASE}/${roomId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify(data)
-  });
-  if (!res.ok) throw new Error("updateRoom failed");
-}
+(function(){
+const SIGNAL_URL = 'https://jsonblob.com/api/jsonBlob';
+let peerConnection = null;
+let dataChannel = null;
+let roomId = null;
+let isHost = false;
+let polling = null;
+let onMessageCb = null;
+let clientId = null;
+let onConnectCb = null;
+let onLeaveCb = null;
+let onHostReadyCb = null;
+let onClientReadyCb = null;
+let clientRetryInterval = null;
+let clientRetryTimeout = null;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ===== Host =====
-let HOST_ROOM_ID = null;
-const hostPeers = new Map(); // clientId -> { pc, dc }
+async function createRoom() {
+  const res = await fetch(SIGNAL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({host: {}, clients: []})
+  });
+  roomId = res.headers.get('Location').split('/').pop();
+  localStorage.setItem('webrtc_room_id', roomId);
+  return roomId;
+}
+
+async function getRoom(roomId) {
+  const res = await fetch(SIGNAL_URL + '/' + roomId);
+  return await res.json();
+}
+
+async function updateRoom(roomId, data) {
+  await fetch(SIGNAL_URL + '/' + roomId, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+}
+
+function setupPeerConnection() {
+  peerConnection = new RTCPeerConnection();
+  peerConnection.onicecandidate = async (event) => {
+    if (event.candidate) {
+      let room = await getRoom(roomId);
+      if (isHost) {
+        room.host.candidates = room.host.candidates || [];
+        room.host.candidates.push(event.candidate);
+      } else {
+        let client = room.clients.find(c => c.clientId === clientId);
+        if (client) {
+          client.candidates = client.candidates || [];
+          client.candidates.push(event.candidate);
+        }
+      }
+      await updateRoom(roomId, room);
+    }
+  };
+  peerConnection.ondatachannel = e => {
+    dataChannel = e.channel;
+    dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
+    dataChannel.onopen = () => onConnectCb && onConnectCb();
+    dataChannel.onclose = () => onLeaveCb && onLeaveCb();
+  };
+}
+
+function setupDataChannel() {
+  dataChannel = peerConnection.createDataChannel('chat');
+  dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
+  dataChannel.onopen = () => onConnectCb && onConnectCb();
+  dataChannel.onclose = () => onLeaveCb && onLeaveCb();
+}
+
+async function addRemoteCandidates(room) {
+  const candidates = isHost
+    ? (room.clients.find(c => c.clientId === clientId)?.candidates || [])
+    : (room.host.candidates || []);
+  for (let c of candidates) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+    } catch (e) {}
+  }
+}
 
 async function startHost() {
-  let rid = localStorage.getItem(LS_KEY);
-  if (!rid) {
-    rid = await createRoom({ clients: [] });
-    localStorage.setItem(LS_KEY, rid);
-    console.log("Создан новый roomId:", rid);
-  } else {
-    console.log("Найден roomId:", rid);
-  }
-  HOST_ROOM_ID = rid;
+  isHost = true;
+  roomId = localStorage.getItem('webrtc_room_id');
+  if (!roomId) roomId = await createRoom();
+  setupPeerConnection();
+  setupDataChannel();
+  window.rtc._dataChannels = window.rtc._dataChannels || {};
+  await updateRoom(roomId, {host: {}, clients: []});
 
-  await updateRoom(HOST_ROOM_ID, { clients: [] });
-  console.log("Комната очищена:", HOST_ROOM_ID);
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
 
-  pollClientOffers();
-  return HOST_ROOM_ID;
-}
-
-async function pollClientOffers() {
-  let pollInterval = 2000;
-  let fastPoll = false;
-  while (true) {
-    let hasNewOffers = false;
-    try {
-      // Ждем завершения запроса, не запускаем следующий до окончания этого
-      const room = await getRoom(HOST_ROOM_ID);
-      const now = Date.now();
-      let changed = false;
-      // Удаляем клиентов с offer старше 30 сек и без answer
-      room.clients = (room.clients || []).filter(c => {
-        if (c.offer && !c.answer && c.offerTimestamp && now - c.offerTimestamp > 30000) {
-          changed = true;
-          console.log("Удаляем просроченного клиента:", c.id);
-          return false;
-        }
-        return true;
-      });
-      if (changed) await updateRoom(HOST_ROOM_ID, room);
-
-      for (const c of room.clients || []) {
-        if (c.offer && !c.answer && !hostPeers.has(c.id)) {
-          hasNewOffers = true;
-          console.log("Новый клиент:", c.id);
-          await hostAcceptClientOffer(c.id, c.offer);
-        }
-      }
-    } catch (err) {
-      console.warn("pollClientOffers error:", err);
-    }
-    // Если есть новые offers — ускоряемся
-    if (hasNewOffers) {
-      pollInterval = 400;
-      fastPoll = true;
-    } else if (fastPoll) {
-      // Если новых нет, возвращаемся к медленному режиму
-      pollInterval = 2000;
-      fastPoll = false;
-    }
-    await sleep(pollInterval);
-  }
-}
-
-async function hostAcceptClientOffer(clientId, clientOffer) {
-  const pc = new RTCPeerConnection(ICE_CONFIG);
-
-  pc.ondatachannel = (e) => {
-    const ch = e.channel;
-    hostPeers.set(clientId, { pc, dc: ch });
-    setupDataChannel(ch, `${clientId}`);
-  };
-
-  let isUpdatingHostCandidates = false;
-  pc.onicecandidate = async (e) => {
-    if (e.candidate) {
-      if (isUpdatingHostCandidates) return;
-      isUpdatingHostCandidates = true;
-      try {
-        let room = await getRoom(HOST_ROOM_ID);
-        const cli = room.clients.find(c => c.id === clientId);
-        if (cli) {
-          cli.hostCandidates = cli.hostCandidates || [];
-          cli.hostCandidates.push(e.candidate);
-          await updateRoom(HOST_ROOM_ID, room);
-        }
-      } finally {
-        isUpdatingHostCandidates = false;
-      }
-    }
-  };
-
-  await pc.setRemoteDescription(clientOffer);
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-
-  let room = await getRoom(HOST_ROOM_ID);
-  const idx = room.clients.findIndex(x => x.id === clientId);
-  if (idx === -1) {
-    room.clients.push({ id: clientId, offer: clientOffer, answer: pc.localDescription });
-  } else {
-    room.clients[idx].answer = pc.localDescription;
-  }
-  await updateRoom(HOST_ROOM_ID, room);
-
-  pollClientCandidates(pc, clientId, "candidates");
-}
-
-// ===== Client =====
-let clientPC = null;
-let clientDC = null;
-let clientPollTimer = null;
-
-async function startClient(roomId, clientId) {
-  clientPC = new RTCPeerConnection(ICE_CONFIG);
-  clientDC = clientPC.createDataChannel("chat");
-  setupDataChannel(clientDC, "Host");
-
-  let isUpdatingClientCandidates = false;
-  clientPC.onicecandidate = async (e) => {
-    if (e.candidate) {
-      if (isUpdatingClientCandidates) return;
-      isUpdatingClientCandidates = true;
-      try {
-        let room = await getRoom(roomId);
-        const me = room.clients.find(c => c.id === clientId);
-        if (me) {
-          me.candidates = me.candidates || [];
-          me.candidates.push(e.candidate);
-          await updateRoom(roomId, room);
-        }
-      } finally {
-        isUpdatingClientCandidates = false;
-      }
-    }
-  };
-
-  const offer = await clientPC.createOffer();
-  await clientPC.setLocalDescription(offer);
+  // Ждём, пока offer будет полностью установлен
+  await sleep(500);
 
   let room = await getRoom(roomId);
-  const existing = room.clients.find(c => c.id === clientId);
-  const now = Date.now();
-  if (existing) {
-    existing.offer = clientPC.localDescription;
-    existing.answer = null;
-    existing.candidates = [];
-    existing.offerTimestamp = now;
-  } else {
-    room.clients.push({
-      id: clientId,
-      offer: clientPC.localDescription,
-      answer: null,
-      candidates: [],
-      offerTimestamp: now
-    });
-  }
+  room.host.offer = {
+    type: peerConnection.localDescription.type,
+    sdp: peerConnection.localDescription.sdp
+  };
   await updateRoom(roomId, room);
 
-  // Заменяем setInterval на асинхронный цикл с await
-  if (clientPollTimer) clearInterval(clientPollTimer);
-  let answerReceived = false;
-  (async function pollAnswer() {
-    while (!answerReceived) {
-      try {
-        room = await getRoom(roomId);
-        const me = room.clients.find(c => c.id === clientId);
-        if (me?.answer) {
-          await clientPC.setRemoteDescription(me.answer);
-          answerReceived = true;
-          console.log("Answer получен:", clientId);
-          pollClientCandidates(clientPC, clientId, "hostCandidates", roomId);
-        }
-      } catch (e) {
-        console.warn("client poll error:", e);
-      }
-      if (!answerReceived) await sleep(1500);
+  if (onHostReadyCb) onHostReadyCb(roomId);
+  return roomId;
+}
+
+function generateClientId() {
+  return 'client_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+}
+
+async function startClient(inputRoomId, timeoutSec = 30, pollIntervalMs = 2000) {
+  isHost = false;
+  roomId = inputRoomId;
+  clientId = generateClientId();
+  setupPeerConnection();
+
+  let room = await getRoom(roomId);
+let retries = 10;
+let offer = null;
+
+while (retries-- > 0) {
+  const room = await getRoom(roomId);
+  offer = room?.host?.offer;
+  if (offer?.type && offer?.sdp) break;
+  await sleep(1000);
+}
+
+if (!offer || !offer.sdp || !offer.type) {
+  console.error('Offer не найден или некорректен после ожидания');
+  return;
+}
+
+await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  room.clients = room.clients || [];
+  room.clients.push({answer, clientId});
+  await updateRoom(roomId, room);
+  await sleep(1000);
+  await addRemoteCandidates(room);
+  if (onClientReadyCb) onClientReadyCb(roomId, clientId);
+
+  let start = Date.now();
+  clientRetryTimeout = setTimeout(() => {
+    if (clientRetryInterval) clearInterval(clientRetryInterval);
+  }, timeoutSec * 1000);
+  clientRetryInterval = setInterval(async () => {
+    if (dataChannel && dataChannel.readyState === 'open') {
+      clearInterval(clientRetryInterval);
+      clearTimeout(clientRetryTimeout);
+      return;
     }
-  })();
-}
-
-// ===== Кандидаты =====
-async function pollClientCandidates(pc, clientId, field, roomId = HOST_ROOM_ID) {
-  const seen = new Set();
-  while (true) {
-    try {
-      const room = await getRoom(roomId);
-      const cli = room.clients.find(c => c.id === clientId);
-      if (cli && cli[field]) {
-        for (const cand of cli[field]) {
-          const key = JSON.stringify(cand);
-          if (!seen.has(key)) {
-            seen.add(key);
-            await pc.addIceCandidate(cand);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("poll candidates error:", err);
+    let room = await getRoom(roomId);
+    await addRemoteCandidates(room);
+    if ((Date.now()-start)/1000 > timeoutSec) {
+      clearInterval(clientRetryInterval);
+      clearTimeout(clientRetryTimeout);
     }
-    await sleep(400);
-  }
+  }, pollIntervalMs);
 }
 
-// ===== DataChannel =====
-let rtcMessageHandler = null;
-let rtcOpenHandler = null;
-let rtcCloseHandler = null;
-let rtcErrorHandler = null;
-
-window.onRTCMessage = (fromId, text) => {
-  let parsed = text;
-  console.log(`Сообщение от ${fromId}:`, parsed);
-  try { parsed = JSON.parse(text); } catch {}
-parsed
-  if (typeof rtcMessageHandler === "function") {
-    rtcMessageHandler(fromId, parsed);
+function sendMessage(json, toId = null, excludeId = null) {
+  if (!isHost) {
+    if (dataChannel && dataChannel.readyState === 'open') {
+      dataChannel.send(JSON.stringify(json));
+    }
+    return;
   }
-};
-
-window.onRTCOpen = (fromId) => {
-  console.log(`Канал открыт с ${fromId}`);
-  if (typeof rtcOpenHandler === "function") {
-    rtcOpenHandler(fromId);
-  }
-};
-
-window.onRTCClose = (fromId) => {
-  console.log(`Канал закрыт с ${fromId}`);
-  if (typeof rtcCloseHandler === "function") {
-    rtcCloseHandler(fromId);
-  }
-};
-
-window.onRTCError = (fromId, error) => {
-  console.warn(`Ошибка канала с ${fromId}:`, error);
-  if (typeof rtcErrorHandler === "function") {
-    rtcErrorHandler(fromId, error);
-  }
-};
-
-function setupDataChannel(channel, label, id = label) {
-  channel.onopen = () => window.onRTCOpen?.(id);
-  channel.onmessage = e => window.onRTCMessage?.(id, e.data);
-  channel.onclose = () => window.onRTCClose?.(id);
-  channel.onerror = e => window.onRTCError?.(id, e);
-}
-
-// ===== Определение роли =====
-function getRole() {
-  const hasRoomId = !!localStorage.getItem(LS_KEY);
-  const hasClientPC = typeof clientPC !== "undefined" && clientPC !== null;
-  // Если есть clientPC — это клиент
-  if (hasClientPC) return "client";
-  // Если есть roomId и нет clientPC — это хост
-  if (hasRoomId) return "host";
-  // Иначе роль не определена
-  return "none";
-}
-function isHost() { return getRole() === "host"; }
-function isClient() { return getRole() === "client"; }
-
-// ===== Универсальная отправка =====
-function sendMessage(data, toClientId = null, exceptClientId = null) {
-  const payload = (typeof data === "object") ? JSON.stringify(data) : String(data);
-  if (isHost()) {
-    if (toClientId) {
-      if (toClientId !== exceptClientId) {
-        const peer = hostPeers.get(toClientId);
-        if (peer?.dc?.readyState === "open") peer.dc.send(payload);
-      }
+  if (typeof window.rtc._dataChannels === 'object') {
+    const channels = window.rtc._dataChannels;
+    if (toId && channels[toId]) {
+      channels[toId].send(JSON.stringify(json));
     } else {
-      // Broadcast всем, кроме exceptClientId если он задан
-      for (const [clientId, { dc }] of hostPeers.entries()) {
-        if (clientId !== exceptClientId && dc?.readyState === "open") {
-          dc.send(payload);
-        }
-      }
+      Object.entries(channels).forEach(([id, ch]) => {
+        if (excludeId && id === excludeId) return;
+        ch.send(JSON.stringify(json));
+      });
     }
-  } else if (isClient()) {
-    if (clientDC?.readyState === "open") clientDC.send(payload);
   } else {
-    console.warn("Не определена роль — сообщение не отправлено");
+    if (dataChannel && dataChannel.readyState === 'open') {
+      dataChannel.send(JSON.stringify(json));
+    }
   }
 }
 
-// ===== API =====
-window.API = {
+function onMessage(cb) {
+  onMessageCb = function(raw) {
+    let obj;
+    try {
+      obj = JSON.parse(raw);
+    } catch(e) {
+      obj = { msg: raw };
+    }
+    const senderId = obj.from || obj.clientId || null;
+    cb(obj, senderId);
+  };
+}
+
+async function waitForClients(timeoutSec = 30, pollIntervalMs = 2000) {
+  let start = Date.now();
+  let room;
+  polling = setInterval(async () => {
+    room = await getRoom(roomId);
+    if (room.clients && room.clients.length) {
+      for (let client of room.clients) {
+        if (client.answer && !peerConnection.currentRemoteDescription) {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(client.answer));
+          await addRemoteCandidates(room);
+        }
+      }
+    }
+    if ((Date.now()-start)/1000 > timeoutSec) {
+      clearInterval(polling);
+      room.clients = (room.clients||[]).filter(c=>!!c.answer);
+      await updateRoom(roomId, room);
+    }
+  }, pollIntervalMs);
+}
+
+function onConnect(cb) { onConnectCb = cb; }
+function onLeave(cb) { onLeaveCb = cb; }
+function onHostReady(cb) { onHostReadyCb = cb; }
+function onClientReady(cb) { onClientReadyCb = cb; }
+function retry(timeoutSec = 30, pollIntervalMs = 2000) {
+  if (clientRetryInterval) clearInterval(clientRetryInterval);
+  if (clientRetryTimeout) clearTimeout(clientRetryTimeout);
+  startClient(roomId, timeoutSec, pollIntervalMs);
+}
+
+window.rtc = {
   startHost,
   startClient,
   sendMessage,
-  getRole,
-  isHost,
-  isClient,
-  hostBroadcast: (msg, toClientId = null, exceptClientId = null) => sendMessage(msg, toClientId, exceptClientId),
-  clientSend: (msg, toClientId = null, exceptClientId = null) => sendMessage(msg, toClientId, exceptClientId),
-  onRTCMessage: (handler) => { rtcMessageHandler = handler; },
-  onRTCOpen: (handler) => { rtcOpenHandler = handler; },
-  onRTCClose: (handler) => { rtcCloseHandler = handler; },
-  onRTCError: (handler) => { rtcErrorHandler = handler; }
+  onMessage,
+  waitForClients,
+  onConnect,
+  onLeave,
+  onHostReady,
+  onClientReady,
+  retry
 };
+})();
