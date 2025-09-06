@@ -74,6 +74,7 @@ function setupPeerConnection() {
       onLeaveCb && onLeaveCb();
     };
   };
+  window.rtc._dataChannels = window.rtc._dataChannels || {};
 }
 
 function setupDataChannel() {
@@ -190,31 +191,31 @@ function sendMessage(json, toId = null, excludeId = null) {
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
   console.log("here! sending a message", message);
+
   if (!isHost) {
+    // Client sends a message directly through its data channel
     if (dataChannel && dataChannel.readyState === 'open') {
       dataChannel.send(JSON.stringify(message));
     }
     return;
   }
 
-  if (typeof window.rtc._dataChannels === 'object') {
-    console.log("Still sending as a host")
-    const channels = window.rtc._dataChannels;
-    Object.entries(channels).forEach(([id, ch]) => {
-      console.log(`Data channel state for client ${id}:`, ch.readyState);
-      if (excludeId && id === excludeId) return;
-      if (ch.readyState === 'open') {
-        ch.send(JSON.stringify(message));
-      } else {
-        console.warn(`Data channel to ${id} is not open`);
-      }
-    });
-  } else {
-    if (dataChannel && dataChannel.readyState === 'open') {
-      console.log("Still sending as a host but to a single client")
-      dataChannel.send(JSON.stringify(message));
+  // Host broadcasts the message
+  const channels = window.rtc._dataChannels || {};
+  console.log("Broadcasting message to clients...");
+  Object.entries(channels).forEach(([id, ch]) => {
+    console.log(`Checking data channel for client ${id}:`, ch.readyState);
+    if (excludeId && id === excludeId) {
+      console.log(`Skipping client ${id} due to excludeId`);
+      return;
     }
-  }
+    if (ch.readyState === 'open') {
+      console.log(`Sending message to client ${id}:`, message);
+      ch.send(JSON.stringify(message));
+    } else {
+      console.warn(`Data channel to ${id} is not open`);
+    }
+  });
 }
 
 function onMessage(cb) {
