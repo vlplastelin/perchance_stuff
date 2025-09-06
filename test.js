@@ -187,7 +187,7 @@ console.log('Remote description set (offer):', offer);
 }
 
 function sendMessage(json, toId = null, excludeId = null) {
-  console.log(dataChannel,dataChannel?.readyState,isHost,clientId);
+  console.log(typeof window.rtc._dataChannels === 'object',dataChannel?.readyState,isHost,clientId);
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
   console.log("here! sending a message", message);
