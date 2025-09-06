@@ -63,14 +63,23 @@ function setupPeerConnection() {
     }
   };
   peerConnection.ondatachannel = e => {
-    dataChannel = e.channel;
-    dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
-    dataChannel.onopen = () => {
-      console.log('Data channel opened');
+    const channel = e.channel;
+    channel.onmessage = e => onMessageCb && onMessageCb(e.data);
+    channel.onopen = () => {
+      console.log('Data channel opened for a new client');
+      if (isHost) {
+        window.rtc._dataChannels = window.rtc._dataChannels || {};
+        window.rtc._dataChannels[channel.label] = channel; // Add the new data channel
+        console.log('Added new data channel to _dataChannels:', channel.label);
+      }
       onConnectCb && onConnectCb();
     };
-    dataChannel.onclose = () => {
-      console.log('Data channel closed');
+    channel.onclose = () => {
+      console.log('Data channel closed for client:', channel.label);
+      if (isHost && window.rtc._dataChannels) {
+        delete window.rtc._dataChannels[channel.label]; // Remove the closed data channel
+        console.log('Removed data channel from _dataChannels:', channel.label);
+      }
       onLeaveCb && onLeaveCb();
     };
   };
