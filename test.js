@@ -204,6 +204,7 @@ function sendMessage(json, toId = null, excludeId = null) {
     } else {
       Object.entries(channels).forEach(([id, ch]) => {
         if (excludeId && id === excludeId) return;
+        console.log("sending message to:", id, message);
         ch.send(JSON.stringify(message));
       });
     }
