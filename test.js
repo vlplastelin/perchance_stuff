@@ -29,10 +29,13 @@ async function createRoom() {
 
 async function getRoom(roomId) {
   const res = await fetch(SIGNAL_URL + '/' + roomId);
-  return await res.json();
+  const room = await res.json();
+  console.log('Fetched room data:', room);
+  return room;
 }
 
 async function updateRoom(roomId, data) {
+  console.log('Updating room data:', data);
   await fetch(SIGNAL_URL + '/' + roomId, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -61,16 +64,28 @@ function setupPeerConnection() {
   peerConnection.ondatachannel = e => {
     dataChannel = e.channel;
     dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
-    dataChannel.onopen = () => onConnectCb && onConnectCb();
-    dataChannel.onclose = () => onLeaveCb && onLeaveCb();
+    dataChannel.onopen = () => {
+      console.log('Data channel opened');
+      onConnectCb && onConnectCb();
+    };
+    dataChannel.onclose = () => {
+      console.log('Data channel closed');
+      onLeaveCb && onLeaveCb();
+    };
   };
 }
 
 function setupDataChannel() {
   dataChannel = peerConnection.createDataChannel('chat');
   dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
-  dataChannel.onopen = () => onConnectCb && onConnectCb();
-  dataChannel.onclose = () => onLeaveCb && onLeaveCb();
+  dataChannel.onopen = () => {
+    console.log('Data channel opened');
+    onConnectCb && onConnectCb();
+  };
+  dataChannel.onclose = () => {
+    console.log('Data channel closed');
+    onLeaveCb && onLeaveCb();
+  };
 }
 
 async function addRemoteCandidates(room) {
@@ -79,8 +94,11 @@ async function addRemoteCandidates(room) {
     : (room.host.candidates || []);
   for (let c of candidates) {
     try {
+      console.log('Adding ICE candidate:', c);
       await peerConnection.addIceCandidate(new RTCIceCandidate(c));
-    } catch (e) {}
+    } catch (e) {
+      console.error('Failed to add ICE candidate:', e);
+    }
   }
 }
 
@@ -137,6 +155,7 @@ if (!offer || !offer.sdp || !offer.type) {
 }
 
 await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+console.log('Remote description set (offer):', offer);
 
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
@@ -211,6 +230,7 @@ async function waitForClients(timeoutSec = 30, pollIntervalMs = 2000) {
     if (room.clients && room.clients.length) {
       for (let client of room.clients) {
         if (client.answer && !peerConnection.currentRemoteDescription) {
+          console.log('Setting remote description for client:', client.clientId);
           await peerConnection.setRemoteDescription(new RTCSessionDescription(client.answer));
           await addRemoteCandidates(room);
         }
@@ -247,4 +267,3 @@ window.rtc = {
   retry
 };
 })();
-
