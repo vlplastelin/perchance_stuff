@@ -211,6 +211,7 @@ function sendMessage(json, toId = null, excludeId = null) {
     });
   } else {
     if (dataChannel && dataChannel.readyState === 'open') {
+      console.log("Still sending as a host but to a single client")
       dataChannel.send(JSON.stringify(message));
     }
   }
