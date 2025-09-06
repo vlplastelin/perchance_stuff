@@ -187,25 +187,29 @@ console.log('Remote description set (offer):', offer);
 }
 
 function sendMessage(json, toId = null, excludeId = null) {
+  const senderId = isHost ? 'host' : clientId; // Determine the sender ID
+  const message = { ...json, senderId }; // Embed the sender ID into the message
+
   if (!isHost) {
     if (dataChannel && dataChannel.readyState === 'open') {
-      dataChannel.send(JSON.stringify(json));
+      dataChannel.send(JSON.stringify(message));
     }
     return;
   }
+
   if (typeof window.rtc._dataChannels === 'object') {
     const channels = window.rtc._dataChannels;
     if (toId && channels[toId]) {
-      channels[toId].send(JSON.stringify(json));
+      channels[toId].send(JSON.stringify(message));
     } else {
       Object.entries(channels).forEach(([id, ch]) => {
         if (excludeId && id === excludeId) return;
-        ch.send(JSON.stringify(json));
+        ch.send(JSON.stringify(message));
       });
     }
   } else {
     if (dataChannel && dataChannel.readyState === 'open') {
-      dataChannel.send(JSON.stringify(json));
+      dataChannel.send(JSON.stringify(message));
     }
   }
 }
