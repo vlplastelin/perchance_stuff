@@ -47,6 +47,7 @@ function setupPeerConnection() {
   peerConnection = new RTCPeerConnection();
   peerConnection.onicecandidate = async (event) => {
     if (event.candidate) {
+      console.log('Generated ICE candidate:', event.candidate);
       let room = await getRoom(roomId);
       if (isHost) {
         room.host.candidates = room.host.candidates || [];
@@ -252,6 +253,20 @@ function retry(timeoutSec = 30, pollIntervalMs = 2000) {
   if (clientRetryInterval) clearInterval(clientRetryInterval);
   if (clientRetryTimeout) clearTimeout(clientRetryTimeout);
   startClient(roomId, timeoutSec, pollIntervalMs);
+}
+
+async function retryAddingCandidates(room) {
+  const candidates = isHost
+    ? (room.clients.find(c => c.clientId === clientId)?.candidates || [])
+    : (room.host.candidates || []);
+  for (let c of candidates) {
+    try {
+      console.log('Retrying ICE candidate:', c);
+      await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+    } catch (e) {
+      console.error('Retry failed for ICE candidate:', e);
+    }
+  }
 }
 
 window.rtc = {
