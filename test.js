@@ -189,7 +189,7 @@ console.log('Remote description set (offer):', offer);
 function sendMessage(json, toId = null, excludeId = null) {
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
-
+  console.log("here! sending a message", message);
   if (!isHost) {
     if (dataChannel && dataChannel.readyState === 'open') {
       dataChannel.send(JSON.stringify(message));
