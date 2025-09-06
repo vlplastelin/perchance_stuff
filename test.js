@@ -63,14 +63,23 @@ function setupPeerConnection() {
     }
   };
   peerConnection.ondatachannel = e => {
-    dataChannel = e.channel;
-    dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
-    dataChannel.onopen = () => {
-      console.log('Data channel opened');
+    const channel = e.channel;
+    channel.onmessage = e => onMessageCb && onMessageCb(e.data);
+    channel.onopen = () => {
+      console.log('Data channel opened for a new client');
+      if (isHost) {
+        window.rtc._dataChannels = window.rtc._dataChannels || {};
+        window.rtc._dataChannels[channel.label] = channel; // Add the new data channel
+        console.log('Added new data channel to _dataChannels:', channel.label);
+      }
       onConnectCb && onConnectCb();
     };
-    dataChannel.onclose = () => {
-      console.log('Data channel closed');
+    channel.onclose = () => {
+      console.log('Data channel closed for client:', channel.label);
+      if (isHost && window.rtc._dataChannels) {
+        delete window.rtc._dataChannels[channel.label]; // Remove the closed data channel
+        console.log('Removed data channel from _dataChannels:', channel.label);
+      }
       onLeaveCb && onLeaveCb();
     };
   };
@@ -187,7 +196,7 @@ console.log('Remote description set (offer):', offer);
 }
 
 function sendMessage(json, toId = null, excludeId = null) {
-  console.log(typeof window.rtc._dataChannels === 'object',dataChannel?.readyState,isHost,clientId);
+  console.log(dataChannel,dataChannel?.readyState,isHost,clientId);
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
   console.log("here! sending a message", message);
@@ -201,7 +210,6 @@ function sendMessage(json, toId = null, excludeId = null) {
   if (typeof window.rtc._dataChannels === 'object') {
     console.log("Still sending as a host")
     const channels = window.rtc._dataChannels;
-    console.log(Object.entries(channels),"entries")
     Object.entries(channels).forEach(([id, ch]) => {
       console.log(`Data channel state for client ${id}:`, ch.readyState);
       if (excludeId && id === excludeId) return;
