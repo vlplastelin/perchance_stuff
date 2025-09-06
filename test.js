@@ -199,15 +199,15 @@ function sendMessage(json, toId = null, excludeId = null) {
 
   if (typeof window.rtc._dataChannels === 'object') {
     const channels = window.rtc._dataChannels;
-    if (toId && channels[toId]) {
-      channels[toId].send(JSON.stringify(message));
-    } else {
-      Object.entries(channels).forEach(([id, ch]) => {
-        if (excludeId && id === excludeId) return;
-        console.log("sending message to:", id, message);
+    Object.entries(channels).forEach(([id, ch]) => {
+      console.log(`Data channel state for client ${id}:`, ch.readyState);
+      if (excludeId && id === excludeId) return;
+      if (ch.readyState === 'open') {
         ch.send(JSON.stringify(message));
-      });
-    }
+      } else {
+        console.warn(`Data channel to ${id} is not open`);
+      }
+    });
   } else {
     if (dataChannel && dataChannel.readyState === 'open') {
       dataChannel.send(JSON.stringify(message));
