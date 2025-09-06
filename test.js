@@ -62,7 +62,7 @@ function setupPeerConnection() {
       await updateRoom(roomId, room);
     }
   };
-  peerConnection.ondatachannel = e => {
+  peerConnection.ondatachannel = (e) => {
     const channel = e.channel;
     const clientId = channel.label; // Use the channel label as the client ID
     console.log(`Data channel received for client: ${clientId}`);
@@ -70,7 +70,7 @@ function setupPeerConnection() {
     // Add the data channel to the global object
     window.rtc._dataChannels[clientId] = channel;
 
-    channel.onmessage = e => onMessageCb && onMessageCb(e.data);
+    channel.onmessage = (e) => onMessageCb && onMessageCb(e.data);
     channel.onopen = () => {
       console.log(`Data channel opened for client: ${clientId}`);
       onConnectCb && onConnectCb(clientId);
@@ -115,21 +115,24 @@ async function startHost() {
   isHost = true;
   roomId = localStorage.getItem('webrtc_room_id');
   if (!roomId) roomId = await createRoom();
+
+  // Initialize the global data channels object
+  window.rtc._dataChannels = window.rtc._dataChannels || {};
+
   setupPeerConnection();
   setupDataChannel();
-  window.rtc._dataChannels = window.rtc._dataChannels || {};
-  await updateRoom(roomId, {host: {}, clients: []});
+  await updateRoom(roomId, { host: {}, clients: [] });
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
 
-  // Ждём, пока offer будет полностью установлен
+  // Wait for the offer to be fully set
   await sleep(500);
 
   let room = await getRoom(roomId);
   room.host.offer = {
     type: peerConnection.localDescription.type,
-    sdp: peerConnection.localDescription.sdp
+    sdp: peerConnection.localDescription.sdp,
   };
   await updateRoom(roomId, room);
 
