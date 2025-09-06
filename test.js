@@ -201,7 +201,7 @@ function sendMessage(json, toId = null, excludeId = null) {
   if (typeof window.rtc._dataChannels === 'object') {
     console.log("Still sending as a host")
     const channels = window.rtc._dataChannels;
-    console.log(Object.entries(channels))
+    console.log(Object.entries(channels),"entries")
     Object.entries(channels).forEach(([id, ch]) => {
       console.log(`Data channel state for client ${id}:`, ch.readyState);
       if (excludeId && id === excludeId) return;
