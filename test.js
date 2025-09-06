@@ -62,26 +62,18 @@ function setupPeerConnection() {
       await updateRoom(roomId, room);
     }
   };
-  peerConnection.ondatachannel = (e) => {
-    const channel = e.channel;
-    const clientId = channel.label; // Use the channel label as the client ID
-    console.log(`Data channel received for client: ${clientId}`);
-
-    // Add the data channel to the global object
-    window.rtc._dataChannels[clientId] = channel;
-
-    channel.onmessage = (e) => onMessageCb && onMessageCb(e.data);
-    channel.onopen = () => {
-      console.log(`Data channel opened for client: ${clientId}`);
-      onConnectCb && onConnectCb(clientId);
+  peerConnection.ondatachannel = e => {
+    dataChannel = e.channel;
+    dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
+    dataChannel.onopen = () => {
+      console.log('Data channel opened');
+      onConnectCb && onConnectCb();
     };
-    channel.onclose = () => {
-      console.log(`Data channel closed for client: ${clientId}`);
-      delete window.rtc._dataChannels[clientId];
-      onLeaveCb && onLeaveCb(clientId);
+    dataChannel.onclose = () => {
+      console.log('Data channel closed');
+      onLeaveCb && onLeaveCb();
     };
   };
-  window.rtc._dataChannels = window.rtc._dataChannels || {};
 }
 
 function setupDataChannel() {
@@ -115,24 +107,21 @@ async function startHost() {
   isHost = true;
   roomId = localStorage.getItem('webrtc_room_id');
   if (!roomId) roomId = await createRoom();
-
-  // Initialize the global data channels object
-  window.rtc._dataChannels = window.rtc._dataChannels || {};
-
   setupPeerConnection();
   setupDataChannel();
-  await updateRoom(roomId, { host: {}, clients: [] });
+  window.rtc._dataChannels = window.rtc._dataChannels || {};
+  await updateRoom(roomId, {host: {}, clients: []});
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
 
-  // Wait for the offer to be fully set
+  // Ждём, пока offer будет полностью установлен
   await sleep(500);
 
   let room = await getRoom(roomId);
   room.host.offer = {
     type: peerConnection.localDescription.type,
-    sdp: peerConnection.localDescription.sdp,
+    sdp: peerConnection.localDescription.sdp
   };
   await updateRoom(roomId, room);
 
@@ -198,34 +187,35 @@ console.log('Remote description set (offer):', offer);
 }
 
 function sendMessage(json, toId = null, excludeId = null) {
+  console.log(dataChannel,dataChannel?.readyState,isHost,clientId);
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
   console.log("here! sending a message", message);
-
   if (!isHost) {
-    // Client sends a message directly through its data channel
     if (dataChannel && dataChannel.readyState === 'open') {
       dataChannel.send(JSON.stringify(message));
     }
     return;
   }
 
-  // Host broadcasts the message
-  const channels = window.rtc._dataChannels || {};
-  console.log("Broadcasting message to clients...");
-  Object.entries(channels).forEach(([id, ch]) => {
-    console.log(`Checking data channel for client ${id}:`, ch.readyState);
-    if (excludeId && id === excludeId) {
-      console.log(`Skipping client ${id} due to excludeId`);
-      return;
+  if (typeof window.rtc._dataChannels === 'object') {
+    console.log("Still sending as a host")
+    const channels = window.rtc._dataChannels;
+    Object.entries(channels).forEach(([id, ch]) => {
+      console.log(`Data channel state for client ${id}:`, ch.readyState);
+      if (excludeId && id === excludeId) return;
+      if (ch.readyState === 'open') {
+        ch.send(JSON.stringify(message));
+      } else {
+        console.warn(`Data channel to ${id} is not open`);
+      }
+    });
+  } else {
+    if (dataChannel && dataChannel.readyState === 'open') {
+      console.log("Still sending as a host but to a single client")
+      dataChannel.send(JSON.stringify(message));
     }
-    if (ch.readyState === 'open') {
-      console.log(`Sending message to client ${id}:`, message);
-      ch.send(JSON.stringify(message));
-    } else {
-      console.warn(`Data channel to ${id} is not open`);
-    }
-  });
+  }
 }
 
 function onMessage(cb) {
@@ -299,5 +289,4 @@ window.rtc = {
   onClientReady,
   retry
 };
-console.log('Current data channels:', window.rtc._dataChannels);
 })();
