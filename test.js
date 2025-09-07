@@ -1,310 +1,263 @@
-(function(){
-const SIGNAL_URL = 'https://jsonblob.com/api/jsonBlob';
-let peerConnection = null;
-let dataChannel = null;
-let roomId = null;
-let isHost = false;
-let polling = null;
-let onMessageCb = null;
-let clientId = null;
-let onConnectCb = null;
-let onLeaveCb = null;
-let onHostReadyCb = null;
-let onClientReadyCb = null;
-let clientRetryInterval = null;
-let clientRetryTimeout = null;
+// WebRTC Chat API using jsonblob for signaling
+class WebRTCChatAPI {
+    constructor() {
+        this.roomid = null;
+        this.isHost = false;
+        this.peerConnections = new Map(); // client_id -> RTCPeerConnection
+        this.dataChannels = new Map(); // client_id -> DataChannel
+        this.onMessageCallback = null;
+        this.onClientConnectedCallback = null;
+        this.onConnectedCallback = null;
+        this.pollingInterval = null;
+        this.blobData = null;
+        this.clientId = null; // for client
+        this.offers = new Map(); // offer_id -> {pc, ice: []}
+    }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-async function createRoom() {
-  const res = await fetch(SIGNAL_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({host: {}, clients: []})
-  });
-  roomId = res.headers.get('Location').split('/').pop();
-  localStorage.setItem('webrtc_room_id', roomId);
-  return roomId;
-}
-
-async function getRoom(roomId) {
-  const res = await fetch(SIGNAL_URL + '/' + roomId);
-  const room = await res.json();
-  console.log('Fetched room data:', room);
-  return room;
-}
-
-async function updateRoom(roomId, data) {
-  console.log('Updating room data:', data);
-  await fetch(SIGNAL_URL + '/' + roomId, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-}
-
-function setupPeerConnection() {
-  peerConnection = new RTCPeerConnection();
-  peerConnection.onicecandidate = async (event) => {
-    if (event.candidate) {
-      console.log('Generated ICE candidate:', event.candidate);
-      let room = await getRoom(roomId);
-      if (isHost) {
-        room.host.candidates = room.host.candidates || [];
-        room.host.candidates.push(event.candidate);
-      } else {
-        let client = room.clients.find(c => c.clientId === clientId);
-        if (client) {
-          client.candidates = client.candidates || [];
-          client.candidates.push(event.candidate);
+    async startHost(roomid) {
+        this.roomid = roomid;
+        this.isHost = true;
+        this.clientId = 'host';
+        // Fetch or create blob
+        if (roomid) {
+            const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
+            if (response.ok) {
+                this.blobData = await response.json();
+            } else {
+                throw new Error('Room not found');
+            }
+        } else {
+            // Create new blob
+            const response = await fetch('https://jsonblob.com/api/jsonBlob', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ offers: [], client_answers: [] })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                this.roomid = data.id;
+                this.blobData = { offers: [], client_answers: [] };
+            } else {
+                throw new Error('Failed to create room');
+            }
         }
-      }
-      await updateRoom(roomId, room);
+        console.log('Host started, roomid:', this.roomid);
     }
-  };
-  peerConnection.ondatachannel = e => {
-    const channel = e.channel;
-    if (!isHost) dataChannel = channel;
-    channel.onmessage = e => {
-      console.log('Client received message:', e.data);
-      onMessageCb && onMessageCb(e.data);
-    };
-    channel.onopen = () => {
-      console.log('Data channel opened for a new client');
-      console.log('channel.readyState:', channel.readyState);
-      if (isHost) {
-        window.rtc._dataChannels = window.rtc._dataChannels || {};
-        window.rtc._dataChannels[channel.label] = channel; // Add the new data channel
-        console.log('Added new data channel to _dataChannels:', channel.label);
-      }
-      onConnectCb && onConnectCb();
-    };
-    channel.onclose = () => {
-      console.log('Data channel closed for client:', channel.label);
-      if (isHost && window.rtc._dataChannels) {
-        delete window.rtc._dataChannels[channel.label]; // Remove the closed data channel
-        console.log('Removed data channel from _dataChannels:', channel.label);
-      }
-      onLeaveCb && onLeaveCb();
-    };
-  };
-}
 
-function setupDataChannel() {
-  dataChannel = peerConnection.createDataChannel('chat');
-  dataChannel.onmessage = e => {
-    console.log('Host received message:', e.data);
-    onMessageCb && onMessageCb(e.data);
-  };
-  dataChannel.onopen = () => {
-    console.log('Data channel opened');
-    console.log('dataChannel.readyState:', dataChannel.readyState);
-    onConnectCb && onConnectCb();
-  };
-  dataChannel.onclose = () => {
-    console.log('Data channel closed');
-    onLeaveCb && onLeaveCb();
-  };
-}
-
-async function addRemoteCandidates(room, clientIdForHost = null) {
-  const candidates = isHost
-    ? (clientIdForHost ? room.clients.find(c => c.clientId === clientIdForHost)?.candidates || [] : room.host.candidates || [])
-    : (room.host.candidates || []);
-  for (let c of candidates) {
-    try {
-      console.log('Adding ICE candidate:', c);
-      await peerConnection.addIceCandidate(new RTCIceCandidate(c));
-    } catch (e) {
-      console.error('Failed to add ICE candidate:', e);
-    }
-  }
-}
-
-async function startHost() {
-  isHost = true;
-  roomId = localStorage.getItem('webrtc_room_id');
-  if (!roomId) roomId = await createRoom();
-  setupPeerConnection();
-  setupDataChannel();
-  window.rtc._dataChannels = window.rtc._dataChannels || {};
-  await updateRoom(roomId, {host: {}, clients: []});
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-
-  // Ждём, пока offer будет полностью установлен
-  await sleep(500);
-
-  let room = await getRoom(roomId);
-  room.host.offer = {
-    type: peerConnection.localDescription.type,
-    sdp: peerConnection.localDescription.sdp
-  };
-  await updateRoom(roomId, room);
-
-  if (onHostReadyCb) onHostReadyCb(roomId);
-  return roomId;
-}
-
-function generateClientId() {
-  return 'client_' + Date.now() + '_' + Math.floor(Math.random()*100000);
-}
-
-async function startClient(inputRoomId, timeoutSec = 30, pollIntervalMs = 2000) {
-  isHost = false;
-  roomId = inputRoomId;
-  clientId = generateClientId();
-  setupPeerConnection();
-
-  let retries = 10;
-  let offer = null;
-  let room;
-  while (retries-- > 0) {
-    room = await getRoom(roomId);
-    offer = room?.host?.offer;
-    if (offer?.type && offer?.sdp) break;
-    await sleep(1000);
-  }
-
-if (!offer || !offer.sdp || !offer.type) {
-  console.error('Offer не найден или некорректен после ожидания');
-  return;
-}
-
-await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-console.log('Remote description set (offer):', offer);
-
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-  room.clients = room.clients || [];
-  room.clients.push({answer, clientId});
-  await updateRoom(roomId, room);
-  await sleep(1000);
-  await addRemoteCandidates(room);
-  if (onClientReadyCb) onClientReadyCb(roomId, clientId);
-
-  let start = Date.now();
-  clientRetryTimeout = setTimeout(() => {
-    if (clientRetryInterval) clearInterval(clientRetryInterval);
-  }, timeoutSec * 1000);
-  clientRetryInterval = setInterval(async () => {
-    if (dataChannel && dataChannel.readyState === 'open') {
-      clearInterval(clientRetryInterval);
-      clearTimeout(clientRetryTimeout);
-      return;
-    }
-    let room = await getRoom(roomId);
-    await addRemoteCandidates(room);
-    if ((Date.now()-start)/1000 > timeoutSec) {
-      clearInterval(clientRetryInterval);
-      clearTimeout(clientRetryTimeout);
-    }
-  }, pollIntervalMs);
-}
-
-function sendMessage(json, toId = null, excludeId = null) {
-  console.log(window.rtc._dataChannels, dataChannel?.readyState, isHost, clientId);
-  const senderId = isHost ? 'host' : clientId; // Determine the sender ID
-  const message = { ...json, senderId }; // Embed the sender ID into the message
-  console.log("here! sending a message", message);
-  console.log('dataChannel.readyState:', dataChannel?.readyState);
-  if (!isHost) {
-    if (dataChannel && dataChannel.readyState === 'open') {
-      dataChannel.send(JSON.stringify(message));
-    }
-    return;
-  }
-
-  if (typeof window.rtc._dataChannels === 'object' && Object.keys(window.rtc._dataChannels).length > 0) {
-    console.log("Still sending as a host");
-    const channels = window.rtc._dataChannels;
-    Object.entries(channels).forEach(([id, ch]) => {
-      console.log(`Data channel state for client ${id}:`, ch.readyState);
-      if (excludeId && id === excludeId) return;
-      if (ch.readyState === 'open') {
-        ch.send(JSON.stringify(message));
-      } else {
-        console.warn(`Data channel to ${id} is not open`);
-      }
-    });
-  } else {
-    if (dataChannel && dataChannel.readyState === 'open') {
-      console.log("Still sending as a host but to a single client");
-      dataChannel.send(JSON.stringify(message));
-    }
-  }
-}
-
-function onMessage(cb) {
-  onMessageCb = function(raw) {
-    let obj;
-    try {
-      obj = JSON.parse(raw);
-    } catch(e) {
-      obj = { msg: raw };
-    }
-    const senderId = obj.from || obj.clientId || null;
-    cb(obj, senderId);
-  };
-}
-
-async function waitForClients(timeoutSec = 30, pollIntervalMs = 2000) {
-  let start = Date.now();
-  let room;
-  polling = setInterval(async () => {
-    room = await getRoom(roomId);
-    if (room.clients && room.clients.length) {
-      for (let client of room.clients) {
-        if (client.answer && !peerConnection.currentRemoteDescription) {
-          console.log('Setting remote description for client:', client.clientId);
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(client.answer));
-          await addRemoteCandidates(room, client.clientId);
+    async startClient(roomid) {
+        this.roomid = roomid;
+        this.isHost = false;
+        this.clientId = Math.random().toString(36).substr(2, 9);
+        const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
+        if (response.ok) {
+            this.blobData = await response.json();
+        } else {
+            throw new Error('Room not found');
         }
-      }
+        console.log('Client started, roomid:', this.roomid);
     }
-    if ((Date.now()-start)/1000 > timeoutSec) {
-      clearInterval(polling);
-      room.clients = (room.clients||[]).filter(c=>!!c.answer);
-      await updateRoom(roomId, room);
+
+    async startLookingForClients(duration, interval) {
+        if (!this.isHost) return;
+        const endTime = Date.now() + duration;
+        this.pollingInterval = setInterval(async () => {
+            if (Date.now() > endTime) {
+                clearInterval(this.pollingInterval);
+                this.pollingInterval = null;
+                return;
+            }
+            try {
+                const response = await fetch(`https://jsonblob.com/api/jsonBlob/${this.roomid}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    // Check for new client answers
+                    const newAnswers = data.client_answers.filter(ans => !this.peerConnections.has(ans.client_id));
+                    for (const ans of newAnswers) {
+                        await this.handleClientAnswer(ans);
+                    }
+                }
+            } catch (e) {
+                console.error('Error polling for clients:', e);
+            }
+        }, interval);
     }
-  }, pollIntervalMs);
+
+    async tryConnecting(duration, interval) {
+        if (this.isHost) return;
+        const endTime = Date.now() + duration;
+        this.pollingInterval = setInterval(async () => {
+            if (Date.now() > endTime) {
+                clearInterval(this.pollingInterval);
+                this.pollingInterval = null;
+                return;
+            }
+            try {
+                const response = await fetch(`https://jsonblob.com/api/jsonBlob/${this.roomid}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    // Check for new offers
+                    const newOffers = data.offers.filter(offer => !this.offers.has(offer.id));
+                    if (newOffers.length > 0) {
+                        // Pick the first new offer
+                        const offer = newOffers[0];
+                        await this.handleHostOffer(offer, data);
+                    }
+                }
+            } catch (e) {
+                console.error('Error trying to connect:', e);
+            }
+        }, interval);
+    }
+
+    async handleClientAnswer(ans) {
+        const offerData = this.offers.get(ans.offer_id);
+        if (!offerData) return;
+        const pc = offerData.pc;
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                offerData.ice.push(event.candidate);
+                // Update blob
+                this.updateBlob();
+            }
+        };
+        pc.ondatachannel = (event) => {
+            const channel = event.channel;
+            this.dataChannels.set(ans.client_id, channel);
+            channel.onmessage = (event) => {
+                if (this.onMessageCallback) {
+                    this.onMessageCallback(event.data, ans.client_id);
+                }
+            };
+            channel.onopen = () => {
+                if (this.onClientConnectedCallback) {
+                    this.onClientConnectedCallback(ans.client_id);
+                }
+            };
+        };
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: ans.answer }));
+        // Add ICE candidates
+        if (ans.ice) {
+            for (const candidate of ans.ice) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+        }
+        this.peerConnections.set(ans.client_id, pc);
+    }
+
+    async handleHostOffer(offer, data) {
+        const pc = new RTCPeerConnection();
+        this.peerConnections.set('host', pc);
+        pc.onicecandidate = async (event) => {
+            if (event.candidate) {
+                // Update blob with client ice for this offer
+                const updateData = { ...data };
+                const ans = updateData.client_answers.find(a => a.offer_id === offer.id && a.client_id === this.clientId);
+                if (ans) {
+                    ans.ice.push(event.candidate);
+                    await this.updateBlob(updateData);
+                }
+            }
+        };
+        const channel = pc.createDataChannel('chat');
+        this.dataChannels.set('host', channel);
+        channel.onmessage = (event) => {
+            if (this.onMessageCallback) {
+                this.onMessageCallback(event.data, 'host');
+            }
+        };
+        channel.onopen = () => {
+            if (this.onConnectedCallback) {
+                this.onConnectedCallback();
+            }
+        };
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offer.offer }));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        // Update blob with answer
+        const updateData = { ...data };
+        updateData.client_answers.push({ offer_id: offer.id, client_id: this.clientId, answer: answer.sdp, ice: [] });
+        await this.updateBlob(updateData);
+        // Add host ICE
+        if (offer.ice) {
+            for (const candidate of offer.ice) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+        }
+    }
+
+    async updateBlob(data) {
+        if (!data) data = this.blobData;
+        await fetch(`https://jsonblob.com/api/jsonBlob/${this.roomid}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+    }
+
+    sendMessage(message, options = {}) {
+        if (this.isHost) {
+            if (options.toId) {
+                // Send to specific client
+                const channel = this.dataChannels.get(options.toId);
+                if (channel && channel.readyState === 'open') {
+                    channel.send(message);
+                }
+            } else if (options.excludeId) {
+                // Send to all except excludeId
+                for (const [id, channel] of this.dataChannels) {
+                    if (id !== options.excludeId && channel.readyState === 'open') {
+                        channel.send(message);
+                    }
+                }
+            } else {
+                // Send to all clients
+                for (const [id, channel] of this.dataChannels) {
+                    if (channel.readyState === 'open') {
+                        channel.send(message);
+                    }
+                }
+            }
+        } else {
+            // Client sends to host
+            const channel = this.dataChannels.get('host');
+            if (channel && channel.readyState === 'open') {
+                channel.send(message);
+            }
+        }
+    }
+
+    onMessage(callback) {
+        this.onMessageCallback = callback;
+    }
+
+    onClientConnected(callback) {
+        this.onClientConnectedCallback = callback;
+    }
+
+    onConnected(callback) {
+        this.onConnectedCallback = callback;
+    }
+
+    // For host to add a new offer for a new client
+    async addOffer() {
+        if (!this.isHost) return;
+        const offerId = Math.random().toString(36).substr(2, 9);
+        const pc = new RTCPeerConnection();
+        this.offers.set(offerId, { pc, ice: [] });
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                this.offers.get(offerId).ice.push(event.candidate);
+                this.updateBlob();
+            }
+        };
+        const channel = pc.createDataChannel('chat');
+        // Note: data channel setup will be in handleClientAnswer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        this.blobData.offers.push({ id: offerId, offer: offer.sdp, ice: [] });
+        await this.updateBlob();
+    }
 }
 
-function onConnect(cb) { onConnectCb = cb; }
-function onLeave(cb) { onLeaveCb = cb; }
-function onHostReady(cb) { onHostReadyCb = cb; }
-function onClientReady(cb) { onClientReadyCb = cb; }
-function retry(timeoutSec = 30, pollIntervalMs = 2000) {
-  if (clientRetryInterval) clearInterval(clientRetryInterval);
-  if (clientRetryTimeout) clearTimeout(clientRetryTimeout);
-  startClient(roomId, timeoutSec, pollIntervalMs);
-}
-
-async function retryAddingCandidates(room) {
-  const candidates = isHost
-    ? (room.clients.find(c => c.clientId === clientId)?.candidates || [])
-    : (room.host.candidates || []);
-  for (let c of candidates) {
-    try {
-      console.log('Retrying ICE candidate:', c);
-      await peerConnection.addIceCandidate(new RTCIceCandidate(c));
-    } catch (e) {
-      console.error('Retry failed for ICE candidate:', e);
-    }
-  }
-}
-
-window.rtc = {
-  startHost,
-  startClient,
-  sendMessage,
-  onMessage,
-  waitForClients,
-  onConnect,
-  onLeave,
-  onHostReady,
-  onClientReady,
-  retry
-};
-})();
+// Expose globally
+window.WebRTCChatAPI = WebRTCChatAPI;
