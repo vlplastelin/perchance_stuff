@@ -40,6 +40,7 @@ class WebRTCChatAPI {
                     throw new Error('Failed to create room');
                 }
             }
+            return this.roomid;
         } else {
             // Create new blob
             const response = await fetch('https://jsonblob.com/api/jsonBlob', {
