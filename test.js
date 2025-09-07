@@ -19,30 +19,29 @@ class WebRTCChatAPI {
     async startHost(roomid = null) {
         this.isHost = true;
         this.clientId = 'host';
+        let finalRoomId;
 
-        let finalRoomId = roomid;
-
-        if (roomid) {
-            // Try to fetch existing room
-            try {
+        try {
+            if (roomid) {
                 const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
                 if (response.ok) {
                     const data = await response.json();
                     if (this.isValidBlobData(data)) {
                         this.blobData = data;
                         this.roomid = roomid;
-                        console.log('Host joined existing room:', roomid);
-                        if (this.onHostReadyCallback) this.onHostReadyCallback();
-                        return roomid;
+                        finalRoomId = roomid;
+                    } else {
+                        throw new Error('Invalid room data');
                     }
+                } else {
+                    throw new Error('Room not found');
                 }
-            } catch (e) {
-                console.warn('Failed to fetch room, creating new:', e);
+            } else {
+                throw new Error('No roomid provided');
             }
-        }
-
-        // Create new room
-        try {
+        } catch (e) {
+            console.warn('Failed to join room, creating new:', e.message);
+            // Create new room
             const response = await fetch('https://jsonblob.com/api/jsonBlob', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -53,15 +52,14 @@ class WebRTCChatAPI {
                 this.roomid = data;
                 this.blobData = { offers: [], client_answers: [] };
                 finalRoomId = data;
-                console.log('Host created new room:', data);
-                if (this.onHostReadyCallback) this.onHostReadyCallback();
-                return data;
             } else {
                 throw new Error('Failed to create room');
             }
-        } catch (e) {
-            throw new Error('Error starting host: ' + e.message);
         }
+
+        console.log('Host started, roomid:', this.roomid);
+        if (this.onHostReadyCallback) this.onHostReadyCallback();
+        return finalRoomId;
     }
 
     async startClient(roomid) {
@@ -98,9 +96,11 @@ class WebRTCChatAPI {
     async parseResponse(response) {
         try {
             const data = await response.json();
-            return data.id || data;
+            const id = data.id || data;
+            return typeof id === 'string' ? id.trim() : String(id).trim();
         } catch {
-            return (await response.text()).trim();
+            const text = await response.text();
+            return text.trim();
         }
     }
 
