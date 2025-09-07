@@ -19,6 +19,7 @@ class WebRTCChatAPI {
     async startHost(roomid) {
         this.isHost = true;
         this.clientId = 'host';
+        let roomToReturn;
         // Fetch or create blob
         if (roomid) {
             const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
@@ -30,6 +31,7 @@ class WebRTCChatAPI {
                         throw new Error('Invalid blob structure');
                     }
                     this.roomid = roomid;
+                    roomToReturn = roomid;
                 } catch (e) {
                     // Invalid JSON or structure, create new
                     const createResponse = await fetch('https://jsonblob.com/api/jsonBlob', {
@@ -41,6 +43,7 @@ class WebRTCChatAPI {
                         const data = await createResponse.json();
                         this.roomid = data.id;
                         this.blobData = { offers: [], client_answers: [] };
+                        roomToReturn = data.id;
                     } else {
                         throw new Error('Failed to create room');
                     }
@@ -56,11 +59,11 @@ class WebRTCChatAPI {
                     const data = await createResponse.json();
                     this.roomid = data.id;
                     this.blobData = { offers: [], client_answers: [] };
+                    roomToReturn = data.id;
                 } else {
                     throw new Error('Failed to create room');
                 }
             }
-            return this.roomid;
         } else {
             // Create new blob
             const response = await fetch('https://jsonblob.com/api/jsonBlob', {
@@ -72,13 +75,14 @@ class WebRTCChatAPI {
                 const data = await response.json();
                 this.roomid = data.id;
                 this.blobData = { offers: [], client_answers: [] };
+                roomToReturn = data.id;
             } else {
                 throw new Error('Failed to create room');
             }
         }
         console.log('Host started, roomid:', this.roomid);
         if (this.onHostReadyCallback) this.onHostReadyCallback();
-        return this.roomid;
+        return roomToReturn;
     }
 
     async startClient(roomid) {
