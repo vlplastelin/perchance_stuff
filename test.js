@@ -40,10 +40,10 @@ class WebRTCChatAPI {
                         body: JSON.stringify({ offers: [], client_answers: [] })
                     });
                     if (createResponse.ok) {
-                        const data = await createResponse.json();
-                        this.roomid = data.id;
+                        const data = await createResponse.text();
+                        this.roomid = data.trim();
                         this.blobData = { offers: [], client_answers: [] };
-                        roomToReturn = data.id;
+                        roomToReturn = data.trim();
                     } else {
                         throw new Error('Failed to create room');
                     }
@@ -56,10 +56,10 @@ class WebRTCChatAPI {
                     body: JSON.stringify({ offers: [], client_answers: [] })
                 });
                 if (createResponse.ok) {
-                    const data = await createResponse.json();
-                    this.roomid = data.id;
+                    const data = await createResponse.text();
+                    this.roomid = data.trim();
                     this.blobData = { offers: [], client_answers: [] };
-                    roomToReturn = data.id;
+                    roomToReturn = data.trim();
                 } else {
                     throw new Error('Failed to create room');
                 }
@@ -72,10 +72,10 @@ class WebRTCChatAPI {
                 body: JSON.stringify({ offers: [], client_answers: [] })
             });
             if (response.ok) {
-                const data = await response.json();
-                this.roomid = data.id;
+                const data = await response.text();
+                this.roomid = data.trim();
                 this.blobData = { offers: [], client_answers: [] };
-                roomToReturn = data.id;
+                roomToReturn = data.trim();
             } else {
                 throw new Error('Failed to create room');
             }
