@@ -65,9 +65,13 @@ function setupPeerConnection() {
   peerConnection.ondatachannel = e => {
     const channel = e.channel;
     if (!isHost) dataChannel = channel;
-    channel.onmessage = e => onMessageCb && onMessageCb(e.data);
+    channel.onmessage = e => {
+      console.log('Client received message:', e.data);
+      onMessageCb && onMessageCb(e.data);
+    };
     channel.onopen = () => {
       console.log('Data channel opened for a new client');
+      console.log('channel.readyState:', channel.readyState);
       if (isHost) {
         window.rtc._dataChannels = window.rtc._dataChannels || {};
         window.rtc._dataChannels[channel.label] = channel; // Add the new data channel
@@ -88,9 +92,13 @@ function setupPeerConnection() {
 
 function setupDataChannel() {
   dataChannel = peerConnection.createDataChannel('chat');
-  dataChannel.onmessage = e => onMessageCb && onMessageCb(e.data);
+  dataChannel.onmessage = e => {
+    console.log('Host received message:', e.data);
+    onMessageCb && onMessageCb(e.data);
+  };
   dataChannel.onopen = () => {
     console.log('Data channel opened');
+    console.log('dataChannel.readyState:', dataChannel.readyState);
     onConnectCb && onConnectCb();
   };
   dataChannel.onclose = () => {
@@ -200,6 +208,7 @@ function sendMessage(json, toId = null, excludeId = null) {
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
   console.log("here! sending a message", message);
+  console.log('dataChannel.readyState:', dataChannel?.readyState);
   if (!isHost) {
     if (dataChannel && dataChannel.readyState === 'open') {
       dataChannel.send(JSON.stringify(message));
@@ -207,7 +216,7 @@ function sendMessage(json, toId = null, excludeId = null) {
     return;
   }
 
-  if (typeof window.rtc._dataChannels === 'object') {
+  if (typeof window.rtc._dataChannels === 'object' && Object.keys(window.rtc._dataChannels).length > 0) {
     console.log("Still sending as a host");
     const channels = window.rtc._dataChannels;
     Object.entries(channels).forEach(([id, ch]) => {
