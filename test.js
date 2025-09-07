@@ -34,51 +34,42 @@ class WebRTCChatAPI {
                     roomToReturn = roomid;
                 } catch (e) {
                     // Invalid JSON or structure, create new
-                    const createResponse = await fetch('https://jsonblob.com/api/jsonBlob', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ offers: [], client_answers: [] })
-                    });
-                    if (createResponse.ok) {
-                        const data = await createResponse.text();
-                        this.roomid = data.trim();
-                        this.blobData = { offers: [], client_answers: [] };
-                        roomToReturn = data.trim();
-                    } else {
-                        throw new Error('Failed to create room');
+                    let id = '';
+                    try {
+                        const data = await createResponse.json();
+                        id = data.id || '';
+                    } catch {
+                        id = (await createResponse.text()).trim() || '';
                     }
+                    this.roomid = id;
+                    this.blobData = { offers: [], client_answers: [] };
+                    roomToReturn = id;
                 }
             } else {
                 // Room not found or invalid, create new
-                const createResponse = await fetch('https://jsonblob.com/api/jsonBlob', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ offers: [], client_answers: [] })
-                });
-                if (createResponse.ok) {
-                    const data = await createResponse.text();
-                    this.roomid = data.trim();
-                    this.blobData = { offers: [], client_answers: [] };
-                    roomToReturn = data.trim();
-                } else {
-                    throw new Error('Failed to create room');
+                let id = '';
+                try {
+                    const data = await createResponse.json();
+                    id = data.id || '';
+                } catch {
+                    id = (await createResponse.text()).trim() || '';
                 }
+                this.roomid = id;
+                this.blobData = { offers: [], client_answers: [] };
+                roomToReturn = id;
             }
         } else {
             // Create new blob
-            const response = await fetch('https://jsonblob.com/api/jsonBlob', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ offers: [], client_answers: [] })
-            });
-            if (response.ok) {
-                const data = await response.text();
-                this.roomid = data.trim();
-                this.blobData = { offers: [], client_answers: [] };
-                roomToReturn = data.trim();
-            } else {
-                throw new Error('Failed to create room');
+            let id = '';
+            try {
+                const data = await response.json();
+                id = data.id || '';
+            } catch {
+                id = (await response.text()).trim() || '';
             }
+            this.roomid = id;
+            this.blobData = { offers: [], client_answers: [] };
+            roomToReturn = id;
         }
         console.log('Host started, roomid:', this.roomid);
         if (this.onHostReadyCallback) this.onHostReadyCallback();
