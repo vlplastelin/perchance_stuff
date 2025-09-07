@@ -8,6 +8,8 @@ class WebRTCChatAPI {
         this.onMessageCallback = null;
         this.onClientConnectedCallback = null;
         this.onConnectedCallback = null;
+        this.onHostReadyCallback = null;
+        this.onClientReadyCallback = null;
         this.pollingInterval = null;
         this.blobData = null;
         this.clientId = null; // for client
@@ -42,6 +44,7 @@ class WebRTCChatAPI {
             }
         }
         console.log('Host started, roomid:', this.roomid);
+        if (this.onHostReadyCallback) this.onHostReadyCallback();
     }
 
     async startClient(roomid) {
@@ -55,6 +58,7 @@ class WebRTCChatAPI {
             throw new Error('Room not found');
         }
         console.log('Client started, roomid:', this.roomid);
+        if (this.onClientReadyCallback) this.onClientReadyCallback();
     }
 
     async startLookingForClients(duration, interval) {
@@ -236,6 +240,14 @@ class WebRTCChatAPI {
 
     onConnected(callback) {
         this.onConnectedCallback = callback;
+    }
+
+    onHostReady(callback) {
+        this.onHostReadyCallback = callback;
+    }
+
+    onClientReady(callback) {
+        this.onClientReadyCallback = callback;
     }
 
     // For host to add a new offer for a new client
