@@ -17,63 +17,58 @@ class WebRTCChatAPI {
     }
 
     async startHost(roomid) {
-        this.isHost = true;
-        this.clientId = 'host';
-        let roomToReturn;
-        // Fetch or create blob
-        if (roomid) {
-            const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
-            if (response.ok) {
-                try {
-                    this.blobData = await response.json();
-                    // Validate structure
-                    if (!this.blobData || typeof this.blobData !== 'object' || !Array.isArray(this.blobData.offers) || !Array.isArray(this.blobData.client_answers)) {
-                        throw new Error('Invalid blob structure');
-                    }
-                    this.roomid = roomid;
-                    roomToReturn = roomid;
-                } catch (e) {
-                    // Invalid JSON or structure, create new
-                    let id = '';
-                    try {
-                        const data = await createResponse.json();
-                        id = data.id || '';
-                    } catch {
-                        id = (await createResponse.text()).trim() || '';
-                    }
-                    this.roomid = id;
-                    this.blobData = { offers: [], client_answers: [] };
-                    roomToReturn = id;
-                }
-            } else {
-                // Room not found or invalid, create new
-                let id = '';
-                try {
-                    const data = await createResponse.json();
-                    id = data.id || '';
-                } catch {
-                    id = (await createResponse.text()).trim() || '';
-                }
-                this.roomid = id;
-                this.blobData = { offers: [], client_answers: [] };
-                roomToReturn = id;
-            }
-        } else {
-            // Create new blob
-            let id = '';
-            try {
-                const data = await response.json();
-                id = data.id || '';
-            } catch {
-                id = (await response.text()).trim() || '';
-            }
-            this.roomid = id;
-            this.blobData = { offers: [], client_answers: [] };
-            roomToReturn = id;
+      this.isHost = true;
+      this.clientId = 'host';
+
+      // Helper to create a new jsonblob
+      const createNewBlob = async () => {
+        const response = await fetch('https://jsonblob.com/api/jsonBlob', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ offers: [], client_answers: [] })
+        });
+        let id = '';
+        try {
+          const data = await response.json();
+          id = data.id || '';
+        } catch {
+          id = (await response.text()).trim() || '';
         }
-        console.log('Host started, roomid:', this.roomid);
-        if (this.onHostReadyCallback) this.onHostReadyCallback();
-        return roomToReturn;
+        this.roomid = id;
+        this.blobData = { offers: [], client_answers: [] };
+        return id;
+      };
+
+      if (roomid) {
+        // Check if the room exists
+        const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
+        if (response.ok) {
+          try {
+            this.blobData = await response.json();
+            if (
+              !this.blobData ||
+              typeof this.blobData !== 'object' ||
+              !Array.isArray(this.blobData.offers) ||
+              !Array.isArray(this.blobData.client_answers)
+            ) {
+              // Invalid structure, create new blob
+              return await createNewBlob();
+            }
+            this.roomid = roomid;
+            if (this.onHostReadyCallback) this.onHostReadyCallback();
+            return roomid;
+          } catch {
+            // Invalid JSON, create new blob
+            return await createNewBlob();
+          }
+        } else {
+          // Room does not exist, create new blob
+          return await createNewBlob();
+        }
+      } else {
+        // No roomid provided, create new blob
+        return await createNewBlob();
+      }
     }
 
     async startClient(roomid) {
