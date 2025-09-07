@@ -23,8 +23,28 @@ class WebRTCChatAPI {
         if (roomid) {
             const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
             if (response.ok) {
-                this.blobData = await response.json();
-                this.roomid = roomid;
+                try {
+                    this.blobData = await response.json();
+                    // Validate structure
+                    if (!this.blobData || typeof this.blobData !== 'object' || !Array.isArray(this.blobData.offers) || !Array.isArray(this.blobData.client_answers)) {
+                        throw new Error('Invalid blob structure');
+                    }
+                    this.roomid = roomid;
+                } catch (e) {
+                    // Invalid JSON or structure, create new
+                    const createResponse = await fetch('https://jsonblob.com/api/jsonBlob', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ offers: [], client_answers: [] })
+                    });
+                    if (createResponse.ok) {
+                        const data = await createResponse.json();
+                        this.roomid = data.id;
+                        this.blobData = { offers: [], client_answers: [] };
+                    } else {
+                        throw new Error('Failed to create room');
+                    }
+                }
             } else {
                 // Room not found or invalid, create new
                 const createResponse = await fetch('https://jsonblob.com/api/jsonBlob', {
@@ -70,7 +90,15 @@ class WebRTCChatAPI {
         this.clientId = Math.random().toString(36).substr(2, 9);
         const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
         if (response.ok) {
-            this.blobData = await response.json();
+            try {
+                this.blobData = await response.json();
+                // Validate structure
+                if (!this.blobData || typeof this.blobData !== 'object' || !Array.isArray(this.blobData.offers) || !Array.isArray(this.blobData.client_answers)) {
+                    throw new Error('Invalid blob structure');
+                }
+            } catch (e) {
+                throw new Error('Invalid room data');
+            }
         } else {
             throw new Error('Room not found');
         }
@@ -91,6 +119,10 @@ class WebRTCChatAPI {
                 const response = await fetch(`https://jsonblob.com/api/jsonBlob/${this.roomid}`);
                 if (response.ok) {
                     const data = await response.json();
+                    if (!data || typeof data !== 'object' || !Array.isArray(data.offers) || !Array.isArray(data.client_answers)) {
+                        console.error('Invalid data structure');
+                        return;
+                    }
                     // Check for new client answers
                     const newAnswers = data.client_answers.filter(ans => !this.peerConnections.has(ans.client_id));
                     for (const ans of newAnswers) {
@@ -116,6 +148,10 @@ class WebRTCChatAPI {
                 const response = await fetch(`https://jsonblob.com/api/jsonBlob/${this.roomid}`);
                 if (response.ok) {
                     const data = await response.json();
+                    if (!data || typeof data !== 'object' || !Array.isArray(data.offers) || !Array.isArray(data.client_answers)) {
+                        console.error('Invalid data structure');
+                        return;
+                    }
                     // Check for new offers
                     const newOffers = data.offers.filter(offer => !this.offers.has(offer.id));
                     if (newOffers.length > 0) {
