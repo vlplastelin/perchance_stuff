@@ -64,6 +64,7 @@ function setupPeerConnection() {
   };
   peerConnection.ondatachannel = e => {
     const channel = e.channel;
+    if (!isHost) dataChannel = channel;
     channel.onmessage = e => onMessageCb && onMessageCb(e.data);
     channel.onopen = () => {
       console.log('Data channel opened for a new client');
@@ -98,9 +99,9 @@ function setupDataChannel() {
   };
 }
 
-async function addRemoteCandidates(room) {
+async function addRemoteCandidates(room, clientIdForHost = null) {
   const candidates = isHost
-    ? (room.clients.find(c => c.clientId === clientId)?.candidates || [])
+    ? (clientIdForHost ? room.clients.find(c => c.clientId === clientIdForHost)?.candidates || [] : room.host.candidates || [])
     : (room.host.candidates || []);
   for (let c of candidates) {
     try {
@@ -148,16 +149,15 @@ async function startClient(inputRoomId, timeoutSec = 30, pollIntervalMs = 2000) 
   clientId = generateClientId();
   setupPeerConnection();
 
-  let room = await getRoom(roomId);
-let retries = 10;
-let offer = null;
-
-while (retries-- > 0) {
-  const room = await getRoom(roomId);
-  offer = room?.host?.offer;
-  if (offer?.type && offer?.sdp) break;
-  await sleep(1000);
-}
+  let retries = 10;
+  let offer = null;
+  let room;
+  while (retries-- > 0) {
+    room = await getRoom(roomId);
+    offer = room?.host?.offer;
+    if (offer?.type && offer?.sdp) break;
+    await sleep(1000);
+  }
 
 if (!offer || !offer.sdp || !offer.type) {
   console.error('Offer не найден или некорректен после ожидания');
@@ -196,7 +196,7 @@ console.log('Remote description set (offer):', offer);
 }
 
 function sendMessage(json, toId = null, excludeId = null) {
-  console.log(window.rtc._dataChannels,dataChannel?.readyState,isHost,clientId);
+  console.log(window.rtc._dataChannels, dataChannel?.readyState, isHost, clientId);
   const senderId = isHost ? 'host' : clientId; // Determine the sender ID
   const message = { ...json, senderId }; // Embed the sender ID into the message
   console.log("here! sending a message", message);
@@ -208,7 +208,7 @@ function sendMessage(json, toId = null, excludeId = null) {
   }
 
   if (typeof window.rtc._dataChannels === 'object') {
-    console.log("Still sending as a host")
+    console.log("Still sending as a host");
     const channels = window.rtc._dataChannels;
     Object.entries(channels).forEach(([id, ch]) => {
       console.log(`Data channel state for client ${id}:`, ch.readyState);
@@ -221,7 +221,7 @@ function sendMessage(json, toId = null, excludeId = null) {
     });
   } else {
     if (dataChannel && dataChannel.readyState === 'open') {
-      console.log("Still sending as a host but to a single client")
+      console.log("Still sending as a host but to a single client");
       dataChannel.send(JSON.stringify(message));
     }
   }
@@ -250,7 +250,7 @@ async function waitForClients(timeoutSec = 30, pollIntervalMs = 2000) {
         if (client.answer && !peerConnection.currentRemoteDescription) {
           console.log('Setting remote description for client:', client.clientId);
           await peerConnection.setRemoteDescription(new RTCSessionDescription(client.answer));
-          await addRemoteCandidates(room);
+          await addRemoteCandidates(room, client.clientId);
         }
       }
     }
