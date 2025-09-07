@@ -17,7 +17,6 @@ class WebRTCChatAPI {
     }
 
     async startHost(roomid) {
-        this.roomid = roomid;
         this.isHost = true;
         this.clientId = 'host';
         // Fetch or create blob
@@ -25,8 +24,21 @@ class WebRTCChatAPI {
             const response = await fetch(`https://jsonblob.com/api/jsonBlob/${roomid}`);
             if (response.ok) {
                 this.blobData = await response.json();
+                this.roomid = roomid;
             } else {
-                throw new Error('Room not found');
+                // Room not found or invalid, create new
+                const createResponse = await fetch('https://jsonblob.com/api/jsonBlob', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ offers: [], client_answers: [] })
+                });
+                if (createResponse.ok) {
+                    const data = await createResponse.json();
+                    this.roomid = data.id;
+                    this.blobData = { offers: [], client_answers: [] };
+                } else {
+                    throw new Error('Failed to create room');
+                }
             }
         } else {
             // Create new blob
@@ -45,9 +57,13 @@ class WebRTCChatAPI {
         }
         console.log('Host started, roomid:', this.roomid);
         if (this.onHostReadyCallback) this.onHostReadyCallback();
+        return this.roomid;
     }
 
     async startClient(roomid) {
+        if (!roomid) {
+            throw new Error('Room ID is required for client');
+        }
         this.roomid = roomid;
         this.isHost = false;
         this.clientId = Math.random().toString(36).substr(2, 9);
