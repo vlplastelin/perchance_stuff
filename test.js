@@ -94,6 +94,12 @@ class WebRTCChatAPI {
     }
 
     async parseResponse(response) {
+        const location = response.headers.get('Location');
+        if (location) {
+            const id = location.split('/').pop();
+            return id.trim();
+        }
+        // Fallback to body
         try {
             const data = await response.json();
             const id = data.id || data;
